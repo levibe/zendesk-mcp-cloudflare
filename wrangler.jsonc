@@ -4,7 +4,7 @@
  */
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "zendesk-mcp-server",
+  "name": "zendesk-mcp",
   "main": "src/index.ts",
   "compatibility_date": "2025-03-10",
   "compatibility_flags": ["nodejs_compat"],
@@ -24,8 +24,9 @@
   },
   "kv_namespaces": [
     {
-      "binding": "OAUTH_KV",
-      "id": "<Add-KV-ID>"
+      // npx wrangler kv namespace create ZENDESK_MCP_OAUTH
+      "binding": "ZENDESK_MCP_OAUTH",
+      "id": "c862c2ee524d4a45b0f531c67b6add15"
     }
   ],
   "observability": {
