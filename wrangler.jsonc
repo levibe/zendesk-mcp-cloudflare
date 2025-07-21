@@ -25,7 +25,7 @@
   "kv_namespaces": [
     {
       // npx wrangler kv namespace create ZENDESK_MCP_OAUTH
-      "binding": "ZENDESK_MCP_OAUTH",
+      "binding": "OAUTH_KV",
       "id": "c862c2ee524d4a45b0f531c67b6add15"
     }
   ],
