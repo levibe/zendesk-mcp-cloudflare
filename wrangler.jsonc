@@ -29,6 +29,10 @@
       "id": "c862c2ee524d4a45b0f531c67b6add15"
     }
   ],
+  "vars": {
+    "ZENDESK_SUBDOMAIN": "momentumdash",
+    "ZENDESK_EMAIL": "support@momentumdash.com",
+  },
   "observability": {
     "enabled": true
   },
