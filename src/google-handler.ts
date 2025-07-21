@@ -111,6 +111,11 @@ app.get('/callback', async (c) => {
 		email: string;
 	}
 
+	// Enforce domain restriction if HOSTED_DOMAIN is set
+	if (c.env.HOSTED_DOMAIN && !email.endsWith(`@${c.env.HOSTED_DOMAIN}`)) {
+		return c.text(`Access restricted to ${c.env.HOSTED_DOMAIN} domain users only`, 403)
+	}
+
 	// Return back to the MCP client a new token
 	const { redirectTo } = await c.env.OAUTH_PROVIDER.completeAuthorization({
 		metadata: {
