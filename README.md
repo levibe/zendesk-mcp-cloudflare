@@ -87,13 +87,13 @@ wrangler kv:namespace create "OAUTH_KV"
 #### Deploy to Production
 ```bash
 npm install
-wrangler deploy
+npx wrangler deploy
 ```
 
 #### Local Development
 ```bash
-npm install
-npm run dev
+pnpm install
+pnpm run dev
 ```
 
 #### Test with MCP Inspector
