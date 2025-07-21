@@ -28,6 +28,7 @@ export const macrosTools: ToolDefinition[] = [
 		}
 	),
 
+	/* DISABLED FOR SECURITY - create_macro tool
 	createTool(
 		'create_macro',
 		'Create a new macro',
@@ -44,4 +45,5 @@ export const macrosTools: ToolDefinition[] = [
 			return withCreateHandling(() => client.createMacro(params), 'Macro')()
 		}
 	)
+	*/
 ]

@@ -91,6 +91,7 @@ export const ticketsTools: ToolDefinition[] = [
 		}
 	),
 
+	/* DISABLED FOR SECURITY - update_ticket tool
 	createTool(
 		'update_ticket',
 		'Update an existing ticket',
@@ -133,7 +134,9 @@ export const ticketsTools: ToolDefinition[] = [
 			)()
 		}
 	),
+	*/
 
+	/* DISABLED FOR SECURITY - delete_ticket tool
 	createTool(
 		'delete_ticket',
 		'Delete a ticket',
@@ -148,4 +151,5 @@ export const ticketsTools: ToolDefinition[] = [
 			)()
 		}
 	)
+	*/
 ]
