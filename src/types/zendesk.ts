@@ -62,3 +62,28 @@ export const macroActionSchema = z.object({
 
 // Tool Handler Type
 export type ToolHandler<T = any> = (client: ZendeskClient, params: T) => Promise<any>;
+
+// Search Response Types
+export interface SearchResponseMetadata {
+	total_count?: number
+	page_info?: {
+		current_page?: number
+		per_page?: number
+		has_next_page?: boolean
+		has_previous_page?: boolean
+	}
+}
+
+export interface StandardizedSearchResult {
+	result_type: string
+	id?: number
+	[key: string]: any
+}
+
+export interface StandardizedSearchResponse {
+	results: StandardizedSearchResult[]
+	metadata: SearchResponseMetadata
+	count?: number
+	next_page?: string | null
+	previous_page?: string | null
+}

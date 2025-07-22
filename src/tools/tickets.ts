@@ -15,7 +15,8 @@ import {
 	tagsSchema
 } from '../types/zendesk'
 import { createTool } from '../utils/tool-registry'
-import { withDeleteHandling, withCreateHandling, withUpdateHandling } from '../utils/error-handling'
+import { withCreateHandling } from '../utils/error-handling'
+import { executeSearchWithStandardizedResponse } from '../utils/search-response'
 
 // Ticket management tools
 export const ticketsTools: ToolDefinition[] = [
@@ -88,6 +89,63 @@ export const ticketsTools: ToolDefinition[] = [
 				() => client.createTicket(ticketData),
 				'Ticket'
 			)()
+		}
+	),
+
+	createTool(
+		'search_tickets',
+		'Search specifically for tickets with ticket-focused parameters',
+		{
+			query: z.string().describe('Search query for tickets (e.g., "urgent", "billing issue", "bug")'),
+			status: ticketStatusSchema.optional().describe('Filter by ticket status'),
+			priority: ticketPrioritySchema.optional().describe('Filter by ticket priority'),
+			type: ticketTypeSchema.optional().describe('Filter by ticket type'),
+			assignee_id: z.number().optional().describe('Filter by assignee user ID'),
+			requester_id: z.number().optional().describe('Filter by requester user ID'),
+			group_id: z.number().optional().describe('Filter by group ID'),
+			created_after: z.string().optional().describe('Filter tickets created after date (ISO format)'),
+			created_before: z.string().optional().describe('Filter tickets created before date (ISO format)'),
+			...sortingSchema,
+			...paginationSchema
+		},
+		async (client: ZendeskClient, params: {
+			query: string;
+			status?: string;
+			priority?: string;
+			type?: string;
+			assignee_id?: number;
+			requester_id?: number;
+			group_id?: number;
+			created_after?: string;
+			created_before?: string;
+			sort_by?: string;
+			sort_order?: 'asc' | 'desc';
+			page?: number;
+			per_page?: number;
+		}) => {
+			const { query } = params
+			
+			// Build the search query with filters
+			let searchQuery = `type:ticket ${query}`
+			
+			if (params.status) searchQuery += ` status:${params.status}`
+			if (params.priority) searchQuery += ` priority:${params.priority}`
+			if (params.type) searchQuery += ` ticket_type:${params.type}`
+			if (params.assignee_id) searchQuery += ` assignee:${params.assignee_id}`
+			if (params.requester_id) searchQuery += ` requester:${params.requester_id}`
+			if (params.group_id) searchQuery += ` group:${params.group_id}`
+			if (params.created_after) searchQuery += ` created>${params.created_after}`
+			if (params.created_before) searchQuery += ` created<${params.created_before}`
+			
+			return executeSearchWithStandardizedResponse(
+				() => client.search(searchQuery, {
+					sort_by: params.sort_by,
+					sort_order: params.sort_order,
+					page: params.page,
+					per_page: params.per_page
+				}),
+				'ticket'
+			)
 		}
 	),
 
