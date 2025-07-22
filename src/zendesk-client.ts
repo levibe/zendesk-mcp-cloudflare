@@ -299,6 +299,68 @@ export class ZendeskClient {
 		return this.request('GET', '/help_center/articles/search.json', null, params)
 	}
 
+	// Categories
+	async listCategories (params?: Record<string, any>) {
+		return this.request('GET', '/help_center/categories.json', null, params)
+	}
+
+	async getCategory (id: number) {
+		return this.request('GET', `/help_center/categories/${id}.json`)
+	}
+
+	/* DISABLED FOR SECURITY - create_category method
+	async createCategory (data: any) {
+		return this.request('POST', '/help_center/categories.json', { category: data })
+	}
+	*/
+
+	/* DISABLED FOR SECURITY - update_category method
+	async updateCategory (id: number, data: any) {
+		return this.request('PUT', `/help_center/categories/${id}.json`, { category: data })
+	}
+	*/
+
+	/* DISABLED FOR SECURITY - delete_category method
+	async deleteCategory (id: number) {
+		return this.request('DELETE', `/help_center/categories/${id}.json`)
+	}
+	*/
+
+	// Sections
+	async listSections (params?: Record<string, any>) {
+		return this.request('GET', '/help_center/sections.json', null, params)
+	}
+
+	async getSection (id: number) {
+		return this.request('GET', `/help_center/sections/${id}.json`)
+	}
+
+	/* DISABLED FOR SECURITY - create_section method
+	async createSection (data: any, categoryId: number) {
+		return this.request('POST', `/help_center/categories/${categoryId}/sections.json`, { section: data })
+	}
+	*/
+
+	/* DISABLED FOR SECURITY - update_section method
+	async updateSection (id: number, data: any) {
+		return this.request('PUT', `/help_center/sections/${id}.json`, { section: data })
+	}
+	*/
+
+	/* DISABLED FOR SECURITY - delete_section method
+	async deleteSection (id: number) {
+		return this.request('DELETE', `/help_center/sections/${id}.json`)
+	}
+	*/
+
+	async listSectionsByCategory (categoryId: number, params?: Record<string, any>) {
+		return this.request('GET', `/help_center/categories/${categoryId}/sections.json`, null, params)
+	}
+
+	async listArticlesBySection (sectionId: number, params?: Record<string, any>) {
+		return this.request('GET', `/help_center/sections/${sectionId}/articles.json`, null, params)
+	}
+
 	// === TALK API ===
 	async getTalkStats () {
 		return this.request('GET', '/channels/voice/stats.json')
