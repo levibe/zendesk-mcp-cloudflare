@@ -25,8 +25,8 @@ app.get('/authorize', async (c) => {
 	return renderApprovalDialog(c.req.raw, {
 		client: await c.env.OAUTH_PROVIDER.lookupClient(clientId),
 		server: {
-			description: 'This MCP Server is a demo for Google OAuth.',
-			name: 'Google OAuth Demo',
+			name: 'Momentum Zendesk MCP',
+			description: 'Secure access to Zendesk APIs through Model Context Protocol.',
 		},
 		state: { oauthReqInfo },
 	})
