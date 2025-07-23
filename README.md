@@ -45,8 +45,8 @@ The server allows MCP clients (like Claude Desktop) to interact securely with Ze
 
 #### For Production
 Create a [Google Cloud OAuth App](https://cloud.google.com/iam/docs/workforce-manage-oauth-app):
-- Homepage URL: `https://zendesk-mcp-server.<your-subdomain>.workers.dev`
-- Authorization callback URL: `https://zendesk-mcp-server.<your-subdomain>.workers.dev/callback`
+- Homepage URL: `https://zendesk-mcp.<your-subdomain>.workers.dev`
+- Authorization callback URL: `https://zendesk-mcp.<your-subdomain>.workers.dev/callback`
 - Note your Client ID and generate a Client secret
 
 #### For Local Development  
@@ -100,7 +100,7 @@ pnpm run dev
 ```bash
 npx @modelcontextprotocol/inspector@latest
 ```
-- For production: Enter `https://zendesk-mcp-server.<your-subdomain>.workers.dev/sse`
+- For production: Enter `https://zendesk-mcp.<your-subdomain>.workers.dev/sse`
 - For local: Enter `http://localhost:8788/sse`
 
 Complete the authentication flow and you'll see all Zendesk tools available.
@@ -116,7 +116,7 @@ Add to your Claude Desktop configuration file:
       "command": "npx",
       "args": [
         "mcp-remote",
-        "https://zendesk-mcp-server.<your-subdomain>.workers.dev/sse"
+        "https://zendesk-mcp.<your-subdomain>.workers.dev/sse"
       ]
     }
   }
