@@ -88,14 +88,46 @@ export async function executeSearchWithStandardizedResponse(
 	searchOperation: () => Promise<any>,
 	defaultResultType?: string
 ): Promise<StandardizedSearchResponse> {
+	const startTime = Date.now()
+
 	try {
 		const rawResponse = await searchOperation()
 		return standardizeSearchResponse(rawResponse, defaultResultType)
 	} catch (error) {
-		// If the search operation fails, return a standardized error response
+		const duration = Date.now() - startTime
+
+		// Structured logging for Cloudflare Workers observability
+		console.error('Search operation failed', {
+			error: error instanceof Error ? {
+				message: error.message,
+				stack: error.stack,
+				cause: error.cause
+			} : String(error),
+			defaultResultType,
+			duration,
+			timestamp: new Date().toISOString()
+		})
+
+		// Enhanced error response with detailed metadata for MCP clients
+		const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
+		const errorType = error instanceof Error ? error.constructor.name : 'UnknownError'
+
+		const errorMetadata: any = {
+			error: errorMessage,
+			errorType,
+			duration
+		}
+
+		// Include error cause chain if available
+		if (error instanceof Error && error.cause) {
+			errorMetadata.errorCause = error.cause instanceof Error
+				? error.cause.message
+				: String(error.cause)
+		}
+
 		return {
 			results: [],
-			metadata: {},
+			metadata: errorMetadata,
 			count: 0,
 			next_page: null,
 			previous_page: null

@@ -111,6 +111,8 @@ export class ZendeskClient {
 			const requestInit: RequestInit = {
 				method,
 				headers,
+				// Add 30 second timeout to prevent hanging requests
+				signal: AbortSignal.timeout(30000)
 			}
 
 			// Only include body for non-GET requests
@@ -133,12 +135,75 @@ export class ZendeskClient {
 				return { success: true }
 			}
 		} catch (error) {
-			// Re-throw with more context
+			// Re-throw with more context, preserving original error chain for debugging
 			if (error instanceof Error) {
-				throw new Error(`Zendesk request failed: ${error.message}`)
+				throw new Error(`Zendesk request failed: ${error.message}`, { cause: error })
 			}
 			throw error
 		}
+	}
+
+	/**
+	 * Check if an error is retryable (transient failure)
+	 */
+	private isRetryableError (error: unknown): boolean {
+		if (!(error instanceof Error)) {
+			return false
+		}
+
+		const message = error.message.toLowerCase()
+
+		// Retry on rate limiting, server errors, and timeouts
+		return (
+			message.includes('429') ||  // Rate limit
+			message.includes('502') ||  // Bad gateway
+			message.includes('503') ||  // Service unavailable
+			message.includes('504') ||  // Gateway timeout
+			message.includes('timeout') || // Timeout errors
+			message.includes('econnreset') || // Connection reset
+			message.includes('etimedout')  // Connection timed out
+		)
+	}
+
+	/**
+	 * Request with automatic retry for transient failures
+	 * Uses exponential backoff for retry delays
+	 */
+	async requestWithRetry (
+		method: string,
+		endpoint: string,
+		data?: any,
+		params?: Record<string, any>,
+		maxRetries = 3
+	): Promise<any> {
+		let lastError: Error | undefined
+
+		for (let attempt = 0; attempt < maxRetries; attempt++) {
+			try {
+				return await this.request(method, endpoint, data, params)
+			} catch (error) {
+				lastError = error as Error
+
+				// Don't retry if this is the last attempt or error is not retryable
+				if (attempt === maxRetries - 1 || !this.isRetryableError(error)) {
+					throw error
+				}
+
+				// Calculate exponential backoff delay: 1s, 2s, 4s (capped at 10s)
+				const delay = Math.min(1000 * Math.pow(2, attempt), 10000)
+
+				console.warn(`Request failed (attempt ${attempt + 1}/${maxRetries}), retrying in ${delay}ms...`, {
+					error: error instanceof Error ? error.message : String(error),
+					method,
+					endpoint
+				})
+
+				// Wait before retrying
+				await new Promise(resolve => setTimeout(resolve, delay))
+			}
+		}
+
+		throw lastError
 	}
 
 	// === TICKETS API ===

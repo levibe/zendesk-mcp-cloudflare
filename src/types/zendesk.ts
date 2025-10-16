@@ -72,6 +72,10 @@ export interface SearchResponseMetadata {
 		has_next_page?: boolean
 		has_previous_page?: boolean
 	}
+	error?: string
+	errorType?: string
+	errorCause?: string
+	duration?: number
 }
 
 export interface StandardizedSearchResult {
