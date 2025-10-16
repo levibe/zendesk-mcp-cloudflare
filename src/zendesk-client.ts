@@ -21,10 +21,47 @@ export class ZendeskClient {
 		this.email = config?.email || env?.ZENDESK_EMAIL || ''
 		this.apiToken = config?.apiToken || env?.ZENDESK_API_TOKEN || ''
 
+		// Validate and sanitize subdomain to prevent injection
+		if (this.subdomain) {
+			this.subdomain = this.sanitizeSubdomain(this.subdomain)
+		}
+
 		// Warn if credentials are missing (but allow instantiation for testing)
 		if (!this.subdomain || !this.email || !this.apiToken) {
 			console.warn('Zendesk credentials not found. Please set ZENDESK_SUBDOMAIN, ZENDESK_EMAIL, and ZENDESK_API_TOKEN.')
 		}
+	}
+
+	/**
+	 * Sanitize subdomain to prevent injection attacks
+	 * Only allows alphanumeric characters, hyphens, and underscores
+	 */
+	private sanitizeSubdomain (subdomain: string): string {
+		const sanitized = subdomain.replace(/[^a-zA-Z0-9-_]/g, '')
+		if (sanitized !== subdomain) {
+			console.warn(`Subdomain was sanitized from "${subdomain}" to "${sanitized}"`)
+		}
+		return sanitized
+	}
+
+	/**
+	 * Validate and sanitize endpoint path to prevent path traversal
+	 */
+	private sanitizeEndpoint (endpoint: string): string {
+		// Remove any attempts at path traversal
+		const sanitized = endpoint.replace(/\.\./g, '').replace(/\/\//g, '/')
+		// Ensure endpoint starts with /
+		return sanitized.startsWith('/') ? sanitized : `/${sanitized}`
+	}
+
+	/**
+	 * Validate numeric IDs to prevent injection
+	 */
+	private validateId (id: number): number {
+		if (!Number.isInteger(id) || id <= 0) {
+			throw new Error(`Invalid ID: ${id}. ID must be a positive integer.`)
+		}
+		return id
 	}
 
 	// Construct the base URL for Zendesk API v2 endpoints
@@ -51,7 +88,10 @@ export class ZendeskClient {
 				throw new Error('Zendesk credentials not configured. Please set environment variables.')
 			}
 
-			const url = new URL(`${this.getBaseUrl()}${endpoint}`)
+			// Sanitize endpoint to prevent path traversal attacks
+			const sanitizedEndpoint = this.sanitizeEndpoint(endpoint)
+
+			const url = new URL(`${this.getBaseUrl()}${sanitizedEndpoint}`)
 
 			// Add query parameters if provided
 			if (params) {
@@ -107,6 +147,7 @@ export class ZendeskClient {
 	}
 
 	async getTicket (id: number) {
+		this.validateId(id)
 		return this.request('GET', `/tickets/${id}.json`)
 	}
 
@@ -115,10 +156,12 @@ export class ZendeskClient {
 	}
 
 	async updateTicket (id: number, data: any) {
+		this.validateId(id)
 		return this.request('PUT', `/tickets/${id}.json`, { ticket: data })
 	}
 
 	async deleteTicket (id: number) {
+		this.validateId(id)
 		return this.request('DELETE', `/tickets/${id}.json`)
 	}
 
@@ -128,6 +171,7 @@ export class ZendeskClient {
 	}
 
 	async getUser (id: number) {
+		this.validateId(id)
 		return this.request('GET', `/users/${id}.json`)
 	}
 
@@ -136,10 +180,12 @@ export class ZendeskClient {
 	}
 
 	async updateUser (id: number, data: any) {
+		this.validateId(id)
 		return this.request('PUT', `/users/${id}.json`, { user: data })
 	}
 
 	async deleteUser (id: number) {
+		this.validateId(id)
 		return this.request('DELETE', `/users/${id}.json`)
 	}
 
@@ -149,6 +195,7 @@ export class ZendeskClient {
 	}
 
 	async getOrganization (id: number) {
+		this.validateId(id)
 		return this.request('GET', `/organizations/${id}.json`)
 	}
 
@@ -157,10 +204,12 @@ export class ZendeskClient {
 	}
 
 	async updateOrganization (id: number, data: any) {
+		this.validateId(id)
 		return this.request('PUT', `/organizations/${id}.json`, { organization: data })
 	}
 
 	async deleteOrganization (id: number) {
+		this.validateId(id)
 		return this.request('DELETE', `/organizations/${id}.json`)
 	}
 
@@ -170,6 +219,7 @@ export class ZendeskClient {
 	}
 
 	async getGroup (id: number) {
+		this.validateId(id)
 		return this.request('GET', `/groups/${id}.json`)
 	}
 
@@ -178,10 +228,12 @@ export class ZendeskClient {
 	}
 
 	async updateGroup (id: number, data: any) {
+		this.validateId(id)
 		return this.request('PUT', `/groups/${id}.json`, { group: data })
 	}
 
 	async deleteGroup (id: number) {
+		this.validateId(id)
 		return this.request('DELETE', `/groups/${id}.json`)
 	}
 
@@ -191,6 +243,7 @@ export class ZendeskClient {
 	}
 
 	async getMacro (id: number) {
+		this.validateId(id)
 		return this.request('GET', `/macros/${id}.json`)
 	}
 
@@ -199,10 +252,12 @@ export class ZendeskClient {
 	}
 
 	async updateMacro (id: number, data: any) {
+		this.validateId(id)
 		return this.request('PUT', `/macros/${id}.json`, { macro: data })
 	}
 
 	async deleteMacro (id: number) {
+		this.validateId(id)
 		return this.request('DELETE', `/macros/${id}.json`)
 	}
 
@@ -212,6 +267,7 @@ export class ZendeskClient {
 	}
 
 	async getView (id: number) {
+		this.validateId(id)
 		return this.request('GET', `/views/${id}.json`)
 	}
 
@@ -220,10 +276,12 @@ export class ZendeskClient {
 	}
 
 	async updateView (id: number, data: any) {
+		this.validateId(id)
 		return this.request('PUT', `/views/${id}.json`, { view: data })
 	}
 
 	async deleteView (id: number) {
+		this.validateId(id)
 		return this.request('DELETE', `/views/${id}.json`)
 	}
 
@@ -233,6 +291,7 @@ export class ZendeskClient {
 	}
 
 	async getTrigger (id: number) {
+		this.validateId(id)
 		return this.request('GET', `/triggers/${id}.json`)
 	}
 
@@ -241,10 +300,12 @@ export class ZendeskClient {
 	}
 
 	async updateTrigger (id: number, data: any) {
+		this.validateId(id)
 		return this.request('PUT', `/triggers/${id}.json`, { trigger: data })
 	}
 
 	async deleteTrigger (id: number) {
+		this.validateId(id)
 		return this.request('DELETE', `/triggers/${id}.json`)
 	}
 
@@ -254,6 +315,7 @@ export class ZendeskClient {
 	}
 
 	async getAutomation (id: number) {
+		this.validateId(id)
 		return this.request('GET', `/automations/${id}.json`)
 	}
 
@@ -262,10 +324,12 @@ export class ZendeskClient {
 	}
 
 	async updateAutomation (id: number, data: any) {
+		this.validateId(id)
 		return this.request('PUT', `/automations/${id}.json`, { automation: data })
 	}
 
 	async deleteAutomation (id: number) {
+		this.validateId(id)
 		return this.request('DELETE', `/automations/${id}.json`)
 	}
 
@@ -280,18 +344,22 @@ export class ZendeskClient {
 	}
 
 	async getArticle (id: number) {
+		this.validateId(id)
 		return this.request('GET', `/help_center/articles/${id}.json`)
 	}
 
 	async createArticle (data: any, sectionId: number) {
+		this.validateId(sectionId)
 		return this.request('POST', `/help_center/sections/${sectionId}/articles.json`, { article: data })
 	}
 
 	async updateArticle (id: number, data: any) {
+		this.validateId(id)
 		return this.request('PUT', `/help_center/articles/${id}.json`, { article: data })
 	}
 
 	async deleteArticle (id: number) {
+		this.validateId(id)
 		return this.request('DELETE', `/help_center/articles/${id}.json`)
 	}
 
@@ -305,6 +373,7 @@ export class ZendeskClient {
 	}
 
 	async getCategory (id: number) {
+		this.validateId(id)
 		return this.request('GET', `/help_center/categories/${id}.json`)
 	}
 
@@ -332,6 +401,7 @@ export class ZendeskClient {
 	}
 
 	async getSection (id: number) {
+		this.validateId(id)
 		return this.request('GET', `/help_center/sections/${id}.json`)
 	}
 
@@ -354,10 +424,12 @@ export class ZendeskClient {
 	*/
 
 	async listSectionsByCategory (categoryId: number, params?: Record<string, any>) {
+		this.validateId(categoryId)
 		return this.request('GET', `/help_center/categories/${categoryId}/sections.json`, null, params)
 	}
 
 	async listArticlesBySection (sectionId: number, params?: Record<string, any>) {
+		this.validateId(sectionId)
 		return this.request('GET', `/help_center/sections/${sectionId}/articles.json`, null, params)
 	}
 
