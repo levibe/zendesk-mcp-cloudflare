@@ -1,6 +1,7 @@
 import OAuthProvider from '@cloudflare/workers-oauth-provider'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { McpAgent } from 'agents/mcp'
+import type { Hono } from 'hono'
 import { GoogleHandler } from './google-handler'
 import { ZendeskClient } from './zendesk-client'
 import { toolCategories } from './tools'
@@ -13,6 +14,12 @@ type Props = {
 	email: string;
 	accessToken: string;
 };
+
+// Type for Cloudflare Workers fetch handler
+type FetchHandler = (request: Request, env: Env, ctx: ExecutionContext) => Promise<Response> | Response;
+
+// Type for Hono app that can be used as a handler
+type HonoHandler = Hono<any> | { fetch: FetchHandler };
 
 export class MyMCP extends McpAgent<Env, Record<string, never>, Props> {
 	server = new McpServer({
@@ -33,10 +40,13 @@ export class MyMCP extends McpAgent<Env, Record<string, never>, Props> {
 }
 
 export default new OAuthProvider({
-	apiHandler: MyMCP.mount('/sse') as any,
+	// Type assertion needed: OAuthProvider expects a generic handler interface
+	// McpAgent.mount returns a compatible Durable Object handler
+	apiHandler: MyMCP.mount('/sse') as FetchHandler,
 	apiRoute: '/sse',
 	authorizeEndpoint: '/authorize',
 	clientRegistrationEndpoint: '/register',
-	defaultHandler: GoogleHandler as any,
+	// GoogleHandler is a Hono app which implements the fetch handler interface
+	defaultHandler: GoogleHandler as HonoHandler,
 	tokenEndpoint: '/token',
 })
