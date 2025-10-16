@@ -69,11 +69,11 @@ export async function fetchUpstreamAuthToken ({
 
 	const resp = await fetch(upstreamUrl, {
 		body: new URLSearchParams({
-			clientId,
-			clientSecret,
-			code,
-			grantType,
-			redirectUri,
+			'client_id': clientId,
+			'client_secret': clientSecret,
+			'code': code,
+			'grant_type': grantType,
+			'redirect_uri': redirectUri,
 		}).toString(),
 		headers: {
 			'Content-Type': 'application/x-www-form-urlencoded',
