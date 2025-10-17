@@ -108,11 +108,14 @@ export class ZendeskClient {
 				'Accept': 'application/json'
 			}
 
+			// Create AbortController for timeout (compatible with all Workers versions)
+			const abortController = new AbortController()
+			const timeoutId = setTimeout(() => abortController.abort(), 30000)
+
 			const requestInit: RequestInit = {
 				method,
 				headers,
-				// Add 30 second timeout to prevent hanging requests
-				signal: AbortSignal.timeout(30000)
+				signal: abortController.signal
 			}
 
 			// Only include body for non-GET requests
@@ -120,19 +123,24 @@ export class ZendeskClient {
 				requestInit.body = JSON.stringify(data)
 			}
 
-			const response = await fetch(url.toString(), requestInit)
+			try {
+				const response = await fetch(url.toString(), requestInit)
+				clearTimeout(timeoutId)
 
-			if (!response.ok) {
-				const errorText = await response.text()
-				throw new Error(`Zendesk API Error: ${response.status} - ${errorText}`)
-			}
+				if (!response.ok) {
+					const errorText = await response.text()
+					throw new Error(`Zendesk API Error: ${response.status} - ${errorText}`)
+				}
 
-			// Handle empty responses (e.g., from DELETE requests)
-			const contentType = response.headers.get('content-type')
-			if (contentType && contentType.includes('application/json')) {
-				return await response.json()
-			} else {
-				return { success: true }
+				// Handle empty responses (e.g., from DELETE requests)
+				const contentType = response.headers.get('content-type')
+				if (contentType && contentType.includes('application/json')) {
+					return await response.json()
+				} else {
+					return { success: true }
+				}
+			} finally {
+				clearTimeout(timeoutId)
 			}
 		} catch (error) {
 			// Re-throw with more context, preserving original error chain for debugging
@@ -149,6 +157,11 @@ export class ZendeskClient {
 	private isRetryableError (error: unknown): boolean {
 		if (!(error instanceof Error)) {
 			return false
+		}
+
+		// Check for AbortError from timeout (thrown by AbortController)
+		if (error.name === 'AbortError') {
+			return true
 		}
 
 		const message = error.message.toLowerCase()
@@ -189,8 +202,8 @@ export class ZendeskClient {
 					throw error
 				}
 
-				// Calculate exponential backoff delay: 1s, 2s, 4s (capped at 10s)
-				const delay = Math.min(1000 * Math.pow(2, attempt), 10000)
+				// Calculate exponential backoff delay: 1s, 2s, 4s (capped at 5s)
+				const delay = Math.min(1000 * Math.pow(2, attempt), 5000)
 
 				console.warn(`Request failed (attempt ${attempt + 1}/${maxRetries}), retrying in ${delay}ms...`, {
 					error: error instanceof Error ? error.message : String(error),
@@ -213,7 +226,7 @@ export class ZendeskClient {
 
 	async getTicket (id: number) {
 		this.validateId(id)
-		return this.request('GET', `/tickets/${id}.json`)
+		return this.requestWithRetry('GET', `/tickets/${id}.json`)
 	}
 
 	async createTicket (data: any) {
@@ -237,7 +250,7 @@ export class ZendeskClient {
 
 	async getUser (id: number) {
 		this.validateId(id)
-		return this.request('GET', `/users/${id}.json`)
+		return this.requestWithRetry('GET', `/users/${id}.json`)
 	}
 
 	async createUser (data: any) {
@@ -400,7 +413,7 @@ export class ZendeskClient {
 
 	// === SEARCH API ===
 	async search (query: string, params: Record<string, any> = {}) {
-		return this.request('GET', '/search.json', null, { query, ...params })
+		return this.requestWithRetry('GET', '/search.json', null, { query, ...params })
 	}
 
 	// === HELP CENTER API ===
@@ -429,7 +442,7 @@ export class ZendeskClient {
 	}
 
 	async searchArticles (params?: Record<string, any>) {
-		return this.request('GET', '/help_center/articles/search.json', null, params)
+		return this.requestWithRetry('GET', '/help_center/articles/search.json', null, params)
 	}
 
 	// Categories
