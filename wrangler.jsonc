@@ -29,9 +29,12 @@
       "id": "c862c2ee524d4a45b0f531c67b6add15"
     }
   ],
-  // Note: Set ZENDESK_SUBDOMAIN and ZENDESK_EMAIL via `wrangler secret put` or .dev.vars for local development
-  // "vars": {
-  // },
+  // Deployment-specific config (ZENDESK_SUBDOMAIN, ZENDESK_EMAIL) is set as plaintext
+  // vars in the Cloudflare dashboard rather than committed here, so this repo stays
+  // generic. keep_vars stops `wrangler deploy` treating this file as the source of
+  // truth and wiping them. Secrets (ZENDESK_API_TOKEN, GOOGLE_*) persist regardless.
+  // For local development, put all of them in .dev.vars — see .dev.vars.example.
+  "keep_vars": true,
   "observability": {
     "enabled": true
   },
