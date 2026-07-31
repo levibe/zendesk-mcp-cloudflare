@@ -40,10 +40,14 @@ export class MyMCP extends McpAgent<Env, Record<string, never>, Props> {
 }
 
 export default new OAuthProvider({
-	// Type assertion needed: OAuthProvider expects a generic handler interface
-	// McpAgent.mount returns a compatible Durable Object handler
-	apiHandler: MyMCP.mount('/sse') as FetchHandler,
-	apiRoute: '/sse',
+	// Type assertions needed: OAuthProvider expects a generic handler interface,
+	// and McpAgent's static helpers return a compatible Durable Object handler.
+	// /mcp is Streamable HTTP, which every current MCP client expects. /sse is the
+	// superseded HTTP+SSE transport, kept so older clients keep working.
+	apiHandlers: {
+		'/mcp': MyMCP.serve('/mcp') as FetchHandler,
+		'/sse': MyMCP.serveSSE('/sse') as FetchHandler,
+	},
 	authorizeEndpoint: '/authorize',
 	clientRegistrationEndpoint: '/register',
 	// GoogleHandler is a Hono app which implements the fetch handler interface
