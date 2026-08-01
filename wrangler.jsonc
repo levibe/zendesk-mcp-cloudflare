@@ -6,7 +6,11 @@
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "zendesk-mcp",
 	"main": "src/index.ts",
-	"compatibility_date": "2025-03-10",
+	// Matched to the build date of the workerd that ships with the pinned wrangler, which is
+	// the newest date that runtime knows about. Setting it further ahead only earns a warning
+	// and no new behaviour, so when this moves again, read the workerd version out of the
+	// lockfile and use that date rather than today's.
+	"compatibility_date": "2026-07-22",
 	"compatibility_flags": ["nodejs_compat"],
 	"migrations": [
 		{
