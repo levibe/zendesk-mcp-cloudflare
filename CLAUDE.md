@@ -24,7 +24,7 @@ This is a remote Model Context Protocol (MCP) server that integrates Zendesk API
 
 ## Development Commands
 
-This project uses pnpm, pinned via the `packageManager` field in `package.json`. Use `pnpm run <script>` rather than the bare `pnpm <script>` shorthand, because some script names (`deploy` among them) collide with pnpm's own built-in commands.
+This project uses pnpm, pinned via the `packageManager` field in `package.json`. Run scripts with `pnpm run <script>` and dependency binaries with `pnpm exec <binary>`. Avoid the bare `pnpm <name>` shorthand: `deploy` is also a built-in pnpm command, and the built-in wins, so `pnpm deploy` would not run the script at all.
 
 ### Local Development
 ```bash
@@ -41,7 +41,7 @@ pnpm run deploy      # Deploy to Cloudflare Workers
 ### Environment Setup
 
 #### Required Secrets (for production)
-Set these via `wrangler secret put <SECRET_NAME>`:
+Set these via `pnpm exec wrangler secret put <SECRET_NAME>`:
 - `GOOGLE_CLIENT_ID` - Google OAuth client ID
 - `GOOGLE_CLIENT_SECRET` - Google OAuth client secret
 - `COOKIE_ENCRYPTION_KEY` - Random string for cookie encryption
@@ -62,7 +62,7 @@ ZENDESK_API_TOKEN=your_token
 
 #### KV Namespace Setup
 ```bash
-pnpm wrangler kv namespace create "OAUTH_KV"
+pnpm exec wrangler kv namespace create "OAUTH_KV"
 # Update wrangler.jsonc with the returned KV ID
 ```
 
@@ -94,7 +94,7 @@ pnpm dlx @modelcontextprotocol/inspector@latest
 ```
 
 ### Claude Desktop Integration
-Add to Claude Desktop config:
+Add to Claude Desktop config. Leave the command below as `npx`, not `pnpm dlx`: it runs on the end user's machine, where Node is a safe assumption but pnpm is not. The pnpm commands elsewhere in this file are for working on the server itself.
 ```json
 {
   "mcpServers": {

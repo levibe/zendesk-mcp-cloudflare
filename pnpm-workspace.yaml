@@ -1,25 +1,34 @@
 # pnpm reads its settings from this file. An equivalent "pnpm" block in
 # package.json is silently ignored, so settings belong here.
 
-# Wait a week before installing a newly published version. Compromised releases
-# are normally caught and pulled within hours, so a week's delay sidesteps that
-# window at the cost of picking up new versions a week late. There is no CLI
-# flag to override this per-install; minimumReleaseAgeExclude below is the
-# only escape hatch.
+# Minutes — 10080 is 7 days. pnpm 11 already waits 1 day by default; this
+# widens that window, since compromised releases are usually caught and pulled
+# within hours. `pnpm install --trust-lockfile` skips the check, but it trusts
+# every entry at once, so the targeted exclusion below is preferred.
 minimumReleaseAge: 10080
 
-# @cloudflare/workers-oauth-provider 0.8.3 was published on 2026-07-29 and is
-# still inside the week-long window, so the cooldown would otherwise refuse to
-# install the version #1 deliberately upgraded to. The cooldown exists to catch
-# unattended and transitive updates that nobody looked at; this one was chosen
-# and reviewed. Drop this entry once the version ages past 2026-08-05.
-minimumReleaseAgeExclude:
-  - "@cloudflare/workers-oauth-provider"
+# pnpm turns this on by default once minimumReleaseAge is set explicitly. Stated
+# here so the behaviour is visible: when no version satisfies the window, the
+# install fails rather than quietly falling back to one that doesn't.
+minimumReleaseAgeStrict: true
 
-# These three ship prebuilt platform binaries and their install scripts only
-# verify or link them. pnpm 11 fails the install outright unless each package
-# is answered here, so the decision has to be recorded either way.
+# Pinned to the exact version rather than the bare package name, which would
+# exempt every future release too. Issue #1 upgraded to 0.8.3 (published
+# 2026-07-29) while it was still inside the window above, and lockfile
+# verification rejects it on a fresh install. Scoped this way the entry expires
+# by itself: 0.8.4 goes back through the full wait.
+minimumReleaseAgeExclude:
+  - "@cloudflare/workers-oauth-provider@0.8.3"
+
+# pnpm 11 fails the install outright (ERR_PNPM_IGNORED_BUILDS) unless every
+# package with an install script is answered here. All three normally just
+# fetch or link a prebuilt platform binary — except sharp, which falls back to
+# a node-gyp build from source when a global libvips is on the machine.
 allowBuilds:
   esbuild: true
   sharp: true
   workerd: true
+
+# Refuse to run a script when node_modules has drifted from the lockfile.
+# This repo has no pre-commit hooks, so it is the only local guard.
+verifyDepsBeforeRun: error

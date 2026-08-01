@@ -1,3 +1,9 @@
+# Lockfiles from other package managers. This project is pnpm-only, and a
+# stray one of these would resolve a different dependency tree than
+# pnpm-lock.yaml. CI fails if either is committed anyway.
+package-lock.json
+yarn.lock
+
 # Logs
 
 logs

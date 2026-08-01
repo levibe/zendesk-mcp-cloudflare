@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reject lockfiles from other package managers
+        run: |
+          if [ -f package-lock.json ] || [ -f yarn.lock ]; then
+            echo "::error::This project is pnpm-only. Remove package-lock.json / yarn.lock and commit pnpm-lock.yaml instead."
+            exit 1
+          fi
+
+      # Reads the pinned version from the packageManager field in package.json.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      # Fails if pnpm-lock.yaml has drifted from package.json. This also runs
+      # the supply-chain checks configured in pnpm-workspace.yaml against every
+      # lockfile entry, on a machine with no warm verification cache.
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm run validate
