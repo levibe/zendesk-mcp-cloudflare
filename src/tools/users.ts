@@ -3,7 +3,6 @@
  */
 
 import { z } from 'zod'
-import type { ZendeskClient } from '../zendesk-client'
 import type { ToolDefinition } from '../types/zendesk'
 import {
 	paginationSchema,
@@ -26,14 +25,7 @@ export const usersTools: ToolDefinition[] = [
 			...paginationSchema,
 			role: z.string().optional().describe('Filter by user role'),
 		},
-		async (
-			client: ZendeskClient,
-			params: {
-				page?: number
-				per_page?: number
-				role?: string
-			}
-		) => {
+		async (client, params) => {
 			return client.listUsers(params)
 		}
 	),
@@ -44,7 +36,7 @@ export const usersTools: ToolDefinition[] = [
 		{
 			id: idSchema.describe('User ID'),
 		},
-		async (client: ZendeskClient, { id }: { id: number }) => {
+		async (client, { id }) => {
 			return client.getUser(id)
 		}
 	),
@@ -60,17 +52,7 @@ export const usersTools: ToolDefinition[] = [
 			phone: z.string().optional().describe('User phone number'),
 			organization_id: z.number().optional().describe('Organization ID'),
 		},
-		async (
-			client: ZendeskClient,
-			params: {
-				name: string
-				email: string
-				role?: string
-				verified?: boolean
-				phone?: string
-				organization_id?: number
-			}
-		) => {
+		async (client, params) => {
 			const userData = {
 				name: params.name,
 				email: params.email,
@@ -100,21 +82,7 @@ export const usersTools: ToolDefinition[] = [
 			...sortingSchema,
 			...paginationSchema,
 		},
-		async (
-			client: ZendeskClient,
-			params: {
-				query: string
-				role?: string
-				verified?: boolean
-				organization_id?: number
-				created_after?: string
-				created_before?: string
-				sort_by?: string
-				sort_order?: 'asc' | 'desc'
-				page?: number
-				per_page?: number
-			}
-		) => {
+		async (client, params) => {
 			const { query } = params
 
 			// Build the search query with filters

@@ -3,7 +3,6 @@
  */
 
 import { z } from 'zod'
-import type { ZendeskClient } from '../zendesk-client'
 import type { ToolDefinition } from '../types/zendesk'
 import {
 	paginationSchema,
@@ -27,15 +26,7 @@ export const ticketsTools: ToolDefinition[] = [
 			...paginationSchema,
 			...sortingSchema,
 		},
-		async (
-			client: ZendeskClient,
-			params: {
-				page?: number
-				per_page?: number
-				sort_by?: string
-				sort_order?: 'asc' | 'desc'
-			}
-		) => {
+		async (client, params) => {
 			return client.listTickets(params)
 		}
 	),
@@ -46,7 +37,7 @@ export const ticketsTools: ToolDefinition[] = [
 		{
 			id: idSchema.describe('Ticket ID'),
 		},
-		async (client: ZendeskClient, { id }: { id: number }) => {
+		async (client, { id }) => {
 			return client.getTicket(id)
 		}
 	),
@@ -65,20 +56,7 @@ export const ticketsTools: ToolDefinition[] = [
 			type: ticketTypeSchema.optional().describe('Ticket type'),
 			tags: tagsSchema.describe('Tags for the ticket'),
 		},
-		async (
-			client: ZendeskClient,
-			params: {
-				subject: string
-				comment: string
-				priority?: string
-				status?: string
-				requester_id?: number
-				assignee_id?: number
-				group_id?: number
-				type?: string
-				tags?: string[]
-			}
-		) => {
+		async (client, params) => {
 			const ticketData = {
 				subject: params.subject,
 				comment: { body: params.comment },
@@ -119,24 +97,7 @@ export const ticketsTools: ToolDefinition[] = [
 			...sortingSchema,
 			...paginationSchema,
 		},
-		async (
-			client: ZendeskClient,
-			params: {
-				query: string
-				status?: string
-				priority?: string
-				type?: string
-				assignee_id?: number
-				requester_id?: number
-				group_id?: number
-				created_after?: string
-				created_before?: string
-				sort_by?: string
-				sort_order?: 'asc' | 'desc'
-				page?: number
-				per_page?: number
-			}
-		) => {
+		async (client, params) => {
 			const { query } = params
 
 			// Build the search query with filters
@@ -178,20 +139,7 @@ export const ticketsTools: ToolDefinition[] = [
 			type: ticketTypeSchema.optional().describe('Updated ticket type'),
 			tags: tagsSchema.describe('Updated tags for the ticket'),
 		},
-		async (
-			client: ZendeskClient,
-			params: {
-				id: number
-				subject?: string
-				comment?: string
-				priority?: string
-				status?: string
-				assignee_id?: number
-				group_id?: number
-				type?: string
-				tags?: string[]
-			}
-		) => {
+		async (client, params) => {
 			const ticketData: Record<string, unknown> = {}
 
 			if (params.subject !== undefined) ticketData.subject = params.subject
@@ -213,7 +161,7 @@ export const ticketsTools: ToolDefinition[] = [
 		{
 			id: idSchema.describe('Ticket ID to delete'),
 		},
-		async (client: ZendeskClient, { id }: { id: number }) => {
+		async (client, { id }) => {
 			return withDeleteHandling(() => client.deleteTicket(id), 'Ticket', id)()
 		}
 	),
