@@ -10,7 +10,7 @@ import type { McpToolResponse } from '../types/zendesk'
  * Returns properly formatted MCP responses
  */
 export const withErrorHandling =
-	<T extends any[], R>(fn: (...args: T) => Promise<R>, successMessage?: string) =>
+	<T extends unknown[], R>(fn: (...args: T) => Promise<R>, successMessage?: string) =>
 	async (...args: T): Promise<McpToolResponse> => {
 		try {
 			const result = await fn(...args)
@@ -48,7 +48,7 @@ export const withErrorHandling =
  * Returns success message instead of empty response
  */
 export const withDeleteHandling = (
-	fn: () => Promise<any>,
+	fn: () => Promise<unknown>,
 	itemType: string,
 	itemId: string | number
 ) =>

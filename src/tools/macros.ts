@@ -41,7 +41,7 @@ export const macrosTools: ToolDefinition[] = [
 			params: {
 				title: string
 				description?: string
-				actions: Array<{ field: string; value: any }>
+				actions: Array<{ field: string; value: unknown }>
 			}
 		) => {
 			return withCreateHandling(() => client.createMacro(params), 'Macro')()
