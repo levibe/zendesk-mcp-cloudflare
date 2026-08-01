@@ -93,7 +93,7 @@ export class ZendeskClient {
 	async request(
 		method: string,
 		endpoint: string,
-		data?: any,
+		data?: unknown,
 		params?: Record<string, unknown>
 	): Promise<unknown> {
 		try {
@@ -199,7 +199,7 @@ export class ZendeskClient {
 	async requestWithRetry(
 		method: string,
 		endpoint: string,
-		data?: any,
+		data?: unknown,
 		params?: Record<string, unknown>,
 		maxRetries = 3
 	): Promise<unknown> {

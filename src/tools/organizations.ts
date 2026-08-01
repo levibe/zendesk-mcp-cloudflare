@@ -3,7 +3,6 @@
  */
 
 import { z } from 'zod'
-import type { ZendeskClient } from '../zendesk-client'
 import type { ToolDefinition } from '../types/zendesk'
 import {
 	paginationSchema,
@@ -22,7 +21,7 @@ export const organizationsTools: ToolDefinition[] = [
 		'list_organizations',
 		'List organizations in Zendesk',
 		paginationSchema,
-		async (client: ZendeskClient, params: { page?: number; per_page?: number }) => {
+		async (client, params) => {
 			return client.listOrganizations(params)
 		}
 	),
@@ -31,7 +30,7 @@ export const organizationsTools: ToolDefinition[] = [
 		'get_organization',
 		'Get a specific organization by ID',
 		{ id: idSchema.describe('Organization ID') },
-		async (client: ZendeskClient, { id }: { id: number }) => {
+		async (client, { id }) => {
 			return client.getOrganization(id)
 		}
 	),
@@ -46,16 +45,7 @@ export const organizationsTools: ToolDefinition[] = [
 			notes: z.string().optional().describe('Notes about the organization'),
 			tags: tagsSchema.describe('Tags for the organization'),
 		},
-		async (
-			client: ZendeskClient,
-			params: {
-				name: string
-				domain_names?: string[]
-				details?: string
-				notes?: string
-				tags?: string[]
-			}
-		) => {
+		async (client, params) => {
 			return withCreateHandling(() => client.createOrganization(params), 'Organization')()
 		}
 	),
@@ -77,19 +67,7 @@ export const organizationsTools: ToolDefinition[] = [
 			...sortingSchema,
 			...paginationSchema,
 		},
-		async (
-			client: ZendeskClient,
-			params: {
-				query: string
-				domain?: string
-				created_after?: string
-				created_before?: string
-				sort_by?: string
-				sort_order?: 'asc' | 'desc'
-				page?: number
-				per_page?: number
-			}
-		) => {
+		async (client, params) => {
 			const { query } = params
 
 			// Build the search query with filters

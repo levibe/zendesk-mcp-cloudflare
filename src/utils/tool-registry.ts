@@ -4,9 +4,9 @@
  */
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import type { ZodTypeAny } from 'zod'
+import type { ZodRawShape } from 'zod'
 import type { ZendeskClient } from '../zendesk-client'
-import type { ToolDefinition } from '../types/zendesk'
+import type { InferParams, ToolDefinition } from '../types/zendesk'
 import { withErrorHandling } from './error-handling'
 
 /**
@@ -69,16 +69,25 @@ export const registerAllTools = (
 }
 
 /**
- * Helper to create a tool definition with proper typing
+ * Creates a tool definition, deriving the handler's parameters from the schema.
+ *
+ * The handler never restates its parameter type — it is inferred from `schema`, so the two
+ * cannot drift apart. Adding a field to a shared schema immediately makes that field visible
+ * to every handler spreading it, and naming a field the schema does not declare is now an
+ * error rather than a parameter the MCP server will never populate.
+ *
+ * The cast is the one place the specific parameter type is given up, and it is safe precisely
+ * here: the compiler has just checked `handler` against `schema` for this call, and the MCP
+ * server validates incoming arguments against that same schema before the handler ever runs.
  */
-export const createTool = <T = any>(
+export const createTool = <S extends ZodRawShape>(
 	name: string,
 	description: string,
-	schema: Record<string, ZodTypeAny>,
-	handler: (client: ZendeskClient, params: T) => Promise<any>
+	schema: S,
+	handler: (client: ZendeskClient, params: InferParams<S>) => Promise<unknown>
 ): ToolDefinition => ({
 	name,
 	description,
 	schema,
-	handler,
+	handler: handler as ToolDefinition['handler'],
 })

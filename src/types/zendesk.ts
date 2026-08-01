@@ -15,12 +15,27 @@ export interface McpToolResponse {
 	isError?: boolean
 }
 
-// Tool Definition Interface
+/**
+ * The parameters a handler receives, derived from its own Zod schema.
+ *
+ * This is the same helper the MCP SDK applies to a tool's schema, so the type a handler
+ * declares is exactly what the server will hand it at runtime — optional fields included,
+ * since `objectOutputType` marks a key optional when its schema accepts `undefined`.
+ */
+export type InferParams<S extends z.ZodRawShape> = z.objectOutputType<S, z.ZodTypeAny>
+
+/**
+ * A registered tool, with its parameter type deliberately erased.
+ *
+ * Tools have differing parameter shapes but have to share one array, so the shape cannot
+ * survive into this interface. `createTool` is what keeps the guarantee: it checks each
+ * handler against its own schema before widening it to fit here.
+ */
 export interface ToolDefinition {
 	name: string
 	description: string
-	schema: Record<string, z.ZodTypeAny>
-	handler: (client: ZendeskClient, params: any) => Promise<any>
+	schema: z.ZodRawShape
+	handler: (client: ZendeskClient, params: Record<string, unknown>) => Promise<unknown>
 }
 
 // Common Pagination Parameters
@@ -59,9 +74,6 @@ export const macroActionSchema = z.object({
 	field: z.string().describe('Field to modify'),
 	value: z.any().describe('Value to set'),
 })
-
-// Tool Handler Type
-export type ToolHandler<T = any> = (client: ZendeskClient, params: T) => Promise<any>
 
 // Search Response Types
 export interface SearchResponseMetadata {
