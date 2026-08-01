@@ -48,13 +48,13 @@ pnpm run lint:fix        # Lint and auto-fix
 pnpm run validate        # type-check, lint, format:check and build together
 ```
 
-`no-explicit-any` is set to warn rather than error, so `pnpm run lint` currently reports 23 warnings and still exits clean.
+`no-explicit-any` warns rather than errors, so `pnpm run lint` exits clean with warnings outstanding. Every remaining `any` is deliberate — run `lint` for the current set. A new one needs a stated reason, in the commit or an issue, so that an `any` nobody has examined stands out from the ones that were argued for.
 
-The Zendesk client no longer contributes to that count on the read side. `request` and `requestWithRetry` return `Promise<unknown>`, and every list method takes `Record<string, unknown>` for its query parameters, so a caller that wants to reach into a response body has to narrow it first. Two places do: `src/tools/help-center.ts`, which walks the category and section hierarchy, and `src/utils/search-response.ts`, which reshapes search bodies. Both start from `isRecord` in `src/utils/narrow.ts`, which proves a value is a non-null object and nothing more, leaving every property still `unknown` and still to be checked. Everything else hands the response straight to `JSON.stringify`.
+The client's read path is fully narrowed and should stay that way. `request` and `requestWithRetry` return `Promise<unknown>`, and every list method takes `Record<string, unknown>` for its query parameters, so reaching into a response body means narrowing it first. Two places do: `src/tools/help-center.ts`, which walks the category and section hierarchy, and `src/utils/search-response.ts`, which reshapes search bodies. Both start from `isRecord` in `src/utils/narrow.ts`, which proves a value is a non-null object and nothing more, leaving every property still `unknown` and still to be checked. Everything else hands the response straight to `JSON.stringify`.
 
-What is left is deliberate rather than overlooked, and each group has an issue behind it. Eighteen of the warnings are the `data` argument on the client's create and update methods, which stays `any` until somebody decides whether hand-maintained Zendesk request payloads are worth the drift (see #12). The other five are in `src/workers-oauth-utils.ts`, which is vendored and is being reworked in #3 and #4.
+What remains is the `data` argument on the client's create and update methods, plus the vendored `src/workers-oauth-utils.ts`. The payloads are an open decision rather than an oversight, and #12 carries the argument.
 
-Note that `unknown` is not a free substitute in every position. It works for a value the code only passes along — a query parameter that gets stringified, a request body handed to `JSON.stringify` — because the constraint lands on the function body. It buys nothing in a **parameter** position where the body just forwards the value, since `unknown` accepts exactly what `any` accepts from a caller. That is why the create and update payloads above are still open rather than quietly swapped.
+The reason they were not simply swapped to `unknown` generalises, so it is worth knowing. `unknown` works for a value the code only passes along — a query parameter that gets stringified, a request body handed to `JSON.stringify` — because the constraint lands on the function body. It buys nothing in a **parameter** position where the body just forwards the value, since `unknown` accepts from a caller exactly what `any` accepts. Swapping those would silence the warning and constrain nobody.
 
 ### Deployment
 
