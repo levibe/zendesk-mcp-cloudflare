@@ -36,14 +36,7 @@ export const macrosTools: ToolDefinition[] = [
 			description: descriptionSchema.describe('Macro description'),
 			actions: z.array(macroActionSchema).describe('Actions to perform when macro is applied'),
 		},
-		async (
-			client: ZendeskClient,
-			params: {
-				title: string
-				description?: string
-				actions: Array<{ field: string; value: unknown }>
-			}
-		) => {
+		async (client, params) => {
 			return withCreateHandling(() => client.createMacro(params), 'Macro')()
 		}
 	),
