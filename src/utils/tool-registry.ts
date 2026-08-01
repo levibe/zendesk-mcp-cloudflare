@@ -64,7 +64,16 @@ export const registerTools = (
 			return
 		}
 
-		server.tool(tool.name, tool.schema, withErrorHandling(tool.handler.bind(null, client)))
+		// The four-argument overload. Passing the schema as the second argument selects the
+		// one without a description, so every tool's description was collected here and then
+		// dropped, and a client saw a bare name and a parameter list. Field descriptions were
+		// unaffected — those ride inside the JSON schema — which is why nothing looked wrong.
+		server.tool(
+			tool.name,
+			tool.description,
+			tool.schema,
+			withErrorHandling(tool.handler.bind(null, client))
+		)
 	})
 
 	return withheld

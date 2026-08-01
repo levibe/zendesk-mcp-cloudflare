@@ -74,6 +74,23 @@ describe('registerTools', () => {
 		expect(publishedBy(server)).toEqual(['list_macros', 'create_macro'])
 	})
 
+	// The SDK picks an overload by argument shape, so handing it the schema one place too early
+	// silently selects the one that takes no description — which is what used to happen, leaving
+	// every client to choose between 36 tools by name alone.
+	it('passes the description along, not just the name and the schema', () => {
+		const server = stubServer()
+		const tool = namedTool('list_macros')
+
+		register(server, [tool])
+
+		expect(server.tool).toHaveBeenCalledWith(
+			'list_macros',
+			tool.description,
+			tool.schema,
+			expect.any(Function)
+		)
+	})
+
 	it('never offers a withheld tool to the server at all', () => {
 		const server = stubServer()
 
@@ -99,7 +116,8 @@ describe('registerTools', () => {
 		})
 
 		register(server, [tool])
-		const [, , handler] = server.tool.mock.calls[0] as unknown as [
+		const [, , , handler] = server.tool.mock.calls[0] as unknown as [
+			string,
 			string,
 			unknown,
 			() => Promise<McpToolResponse>,
