@@ -78,6 +78,10 @@ Set these via `pnpm exec wrangler secret put <SECRET_NAME>`:
 - `ZENDESK_API_TOKEN` - Zendesk API token
 - `HOSTED_DOMAIN` - (Optional) Restrict to specific Google domain
 
+Everything above is a secret, including `ZENDESK_SUBDOMAIN` and `ZENDESK_EMAIL`, which are not sensitive and would otherwise be ordinary dashboard vars. Set new deployment config the same way, because a var will not survive.
+
+Workers Builds deploys the production branch with `wrangler deploy`, which honours `keep_vars`. It builds every other branch with `wrangler versions upload`, which takes no equivalent flag and clears plain vars while leaving encrypted ones untouched. So every pull request emptied anything held as a var, and it did so silently — the symptom arrives much later and far from the cause, as the client reporting missing credentials rather than as a deploy that removed them. Cloudflare closed the request to add `--keep-vars` to `versions upload` without it shipping, so this is the state of things rather than a bug awaiting a fix.
+
 #### Local Development Setup
 
 Create `.dev.vars` file:
