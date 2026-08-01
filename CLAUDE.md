@@ -26,7 +26,9 @@ This is a remote Model Context Protocol (MCP) server that integrates Zendesk API
 
 This project uses pnpm, pinned via the `packageManager` field in `package.json`. Run scripts with `pnpm run <script>` and dependency binaries with `pnpm exec <binary>`. Avoid the bare `pnpm <name>` shorthand: `deploy` is also a built-in pnpm command, and the built-in wins, so `pnpm deploy` would not run the script at all.
 
-`.nvmrc` deliberately names the major (`22`) rather than a full version, because both `nvm use` and `actions/setup-node` read a partial version as a range and would pin the old `22.13.x` line. The `>=22.13` floor in `engines` matches pnpm's own requirement and is advisory, since `engine-strict` is off by default. It rarely needs enforcing: pnpm 11 exits outright below Node 22.13, with Node 20 the one exception, where it warns and carries on.
+`.nvmrc` deliberately names the major (`24`) rather than a full version, because both `nvm use` and `actions/setup-node` read a partial version as a range and would pin the oldest release in that line. Track the active LTS here — nothing in the Worker runs on Node, so this only decides what the local tooling and CI build on.
+
+The `>=22.13` floor in `engines` is a different question and deliberately sits below `.nvmrc`. It mirrors pnpm's own requirement rather than what this repo develops against, so it moves when pnpm's floor moves and not when `.nvmrc` does. It is advisory in any case, since `engine-strict` is off by default, and it rarely needs enforcing: pnpm 11 exits outright below Node 22.13, with Node 20 the one exception, where it warns and carries on.
 
 ### Local Development
 
