@@ -95,7 +95,7 @@ export class ZendeskClient {
 		endpoint: string,
 		data?: any,
 		params?: Record<string, unknown>
-	): Promise<any> {
+	): Promise<unknown> {
 		try {
 			// Validate credentials before making requests
 			if (!this.subdomain || !this.email || !this.apiToken) {
@@ -202,7 +202,7 @@ export class ZendeskClient {
 		data?: any,
 		params?: Record<string, unknown>,
 		maxRetries = 3
-	): Promise<any> {
+	): Promise<unknown> {
 		let lastError: Error | undefined
 
 		for (let attempt = 0; attempt < maxRetries; attempt++) {
