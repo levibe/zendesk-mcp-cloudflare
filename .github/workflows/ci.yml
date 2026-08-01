@@ -5,9 +5,19 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+# Supersede in-flight runs on a branch that gets pushed again. Kept off for
+# main so every merged commit still gets a result of its own.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 

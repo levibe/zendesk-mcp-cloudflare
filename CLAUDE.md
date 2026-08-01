@@ -89,9 +89,10 @@ The MCP server currently provides these Zendesk tools:
 
 ### Local Testing with MCP Inspector
 ```bash
-pnpm dlx @modelcontextprotocol/inspector@latest
+pnpm dlx @modelcontextprotocol/inspector
 # Connect to: http://localhost:8788/sse
 ```
+The `minimumReleaseAge` cooldown applies to `pnpm dlx` as well, so this resolves to the newest inspector published more than a week ago. Pinning `@latest` would not change that, only make it misleading.
 
 ### Claude Desktop Integration
 Add to Claude Desktop config. Leave the command below as `npx`, not `pnpm dlx`: it runs on the end user's machine, where Node is a safe assumption but pnpm is not. The pnpm commands elsewhere in this file are for working on the server itself.

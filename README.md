@@ -99,8 +99,9 @@ pnpm run dev
 
 #### Test with MCP Inspector
 ```bash
-pnpm dlx @modelcontextprotocol/inspector@latest
+pnpm dlx @modelcontextprotocol/inspector
 ```
+The cooldown in `pnpm-workspace.yaml` applies here too, so this resolves to the newest inspector released more than a week ago rather than the absolute newest.
 - For production: Enter `https://zendesk-mcp.<your-subdomain>.workers.dev/sse`
 - For local: Enter `http://localhost:8788/sse`
 

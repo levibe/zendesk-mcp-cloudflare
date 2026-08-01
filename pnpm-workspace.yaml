@@ -29,6 +29,9 @@ allowBuilds:
   sharp: true
   workerd: true
 
-# Refuse to run a script when node_modules has drifted from the lockfile.
-# This repo has no pre-commit hooks, so it is the only local guard.
-verifyDepsBeforeRun: error
+# Reinstall when node_modules has drifted from the lockfile, rather than only
+# complaining. This repo has no pre-commit hooks, so it is the only local guard.
+# `install` rather than `error` because editing minimumReleaseAgeExclude above
+# marks node_modules stale, so `error` would fail the next script run with
+# ERR_PNPM_VERIFY_DEPS_BEFORE_RUN the moment someone deletes the pinned entry.
+verifyDepsBeforeRun: install
