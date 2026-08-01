@@ -21,20 +21,21 @@
 	// equally patch globalThis.fetch, and zendesk-client.ts puts a Basic credential on every
 	// outbound call, so treat this as one layer and not as a boundary.
 	"compatibility_flags": ["nodejs_compat", "nodejs_compat_do_not_populate_process_env"],
+	// #40 moved the server onto MCP revision 2026-07-28, which has no sessions, so there is
+	// nothing left for a Durable Object to hold. v2 is what actually retires the class —
+	// deleting the binding alone fails the deploy, because Cloudflare will not drop a class it
+	// still has state for without being told to. v1 has to stay: the list is a history rather
+	// than a description, and removing an applied entry re-runs everything after it.
 	"migrations": [
 		{
 			"new_sqlite_classes": ["MyMCP"],
 			"tag": "v1",
 		},
+		{
+			"deleted_classes": ["MyMCP"],
+			"tag": "v2",
+		},
 	],
-	"durable_objects": {
-		"bindings": [
-			{
-				"class_name": "MyMCP",
-				"name": "MCP_OBJECT",
-			},
-		],
-	},
 	"kv_namespaces": [
 		{
 			// pnpm exec wrangler kv namespace create ZENDESK_MCP_OAUTH
