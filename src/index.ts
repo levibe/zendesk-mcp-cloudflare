@@ -20,15 +20,19 @@ announceWithheldTools(toolCategories)
  * per request by contract, which is the whole of the guarantee — nothing at runtime stops a
  * caller hoisting an `McpServer` to module scope and closing over it instead.
  *
- * Do not, and know what goes wrong if you do, because it is not what you would expect.
- * `Server.connect` overwrites `_transport` without complaint, so a shared instance answers
- * sequential requests perfectly well and looks fine in local testing. The damage shows up
- * only under concurrency: each new `connect` takes the transport away from whatever exchange
- * is still in flight, leaving it with nowhere to send its response. Every request but the
- * newest hangs, and the newest always returns normally — so the endpoint goes on looking
- * healthy while requests are quietly stranded behind it. The single-use check that does exist
- * guards the transport rather than the server, and never fires here, since a fresh transport
- * is built per request either way.
+ * Do not, and know that nothing will tell you so. `Server.connect` reassigns its transport
+ * without complaint, and the SDK's one single-use check guards the transport rather than the
+ * server, so it never fires when a fresh transport is built per request anyway. A shared
+ * instance then answers sequential requests perfectly correctly, which is what local testing
+ * and a quiet staging environment both produce.
+ *
+ * It comes apart under concurrency, through the teardown rather than the dispatch. Finishing
+ * an exchange closes the server, and a close runs `abort` over every request handler still in
+ * flight on that instance; those handlers drop their results, and the HTTP requests waiting on
+ * them never settle. So the endpoint keeps answering while some fraction of traffic silently
+ * fails to come back — which is a far worse thing to debug than an exception would be. Do not
+ * reason from which request "wins": that depends on completion order, and the failure is easy
+ * to describe wrongly, as two rounds of review on this comment established.
  *
  * The client is built per request for the same reason, and costs nothing to make — it holds
  * configuration read from `env` and opens no connection of its own.
