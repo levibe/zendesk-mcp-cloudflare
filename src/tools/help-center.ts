@@ -8,6 +8,7 @@ import type { ToolDefinition } from '../types/zendesk'
 import { paginationSchema, sortingSchema, idSchema } from '../types/zendesk'
 import { createTool } from '../utils/tool-registry'
 import { executeSearchWithStandardizedResponse } from '../utils/search-response'
+import { isRecord } from '../utils/narrow'
 
 /**
  * A category, section or article as `get_help_center_hierarchy` uses it. That tool is the
@@ -21,7 +22,7 @@ interface HelpCenterEntity {
 }
 
 const isHelpCenterEntity = (value: unknown): value is HelpCenterEntity =>
-	typeof value === 'object' && value !== null && typeof (value as HelpCenterEntity).id === 'number'
+	isRecord(value) && typeof value.id === 'number'
 
 /**
  * Reads the entities stored under `key` out of a response body. Both shapes Zendesk uses are
@@ -31,9 +32,9 @@ const isHelpCenterEntity = (value: unknown): value is HelpCenterEntity =>
  * this file relied on before the client started returning `unknown`.
  */
 const readEntities = (response: unknown, key: string): HelpCenterEntity[] => {
-	if (typeof response !== 'object' || response === null) return []
+	if (!isRecord(response)) return []
 
-	const value = (response as Record<string, unknown>)[key]
+	const value = response[key]
 	if (Array.isArray(value)) return value.filter(isHelpCenterEntity)
 	return isHelpCenterEntity(value) ? [value] : []
 }
