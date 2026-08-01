@@ -12,8 +12,20 @@ This is a remote Model Context Protocol (MCP) server that integrates Zendesk API
 
 - **OAuth Authentication**: Uses Google OAuth for MCP client authentication via `@cloudflare/workers-oauth-provider`
 - **Zendesk API Integration**: Comprehensive Zendesk API client with full CRUD operations for tickets, users, organizations, etc.
-- **Cloudflare Workers Deployment**: Serverless deployment with Durable Objects for state management
+- **Cloudflare Workers Deployment**: Serverless, and stateless — no Durable Object, no storage of its own
 - **MCP Protocol**: Implements the Model Context Protocol for tool exposure to AI clients
+
+### The server holds nothing between requests
+
+MCP revision 2026-07-28 removed protocol-level sessions, and this server is built the way that implies. `src/index.ts` hands `createMcpHandler` a factory, and the factory builds a fresh `McpServer` and a fresh `ZendeskClient` for every request. Nothing is cached across calls and nothing needs to be: the client holds configuration read from `env` and opens no connection, and every tool is one request to Zendesk whose result goes straight back.
+
+This is not a style preference and it cannot be optimised away by hoisting the server to module scope. SDK v2 refuses a second transport on a `Server` that already has one, so a shared instance fails on the second request rather than leaking state quietly.
+
+Anything genuinely needing to survive across calls has to become an explicit handle: the server mints it, returns it, and the model passes it back as an ordinary tool argument. There is nowhere else to put it.
+
+Two things follow that are easy to get wrong. Work that should happen once per isolate must not sit inside the factory, or it repeats on every tool call — `announceWithheldTools` is separate from `registerAllTools` for exactly this reason, and the comment on it explains the split. And `this.env` is gone along with the class, so `env` arrives as a `fetch` argument and is threaded to whatever needs it.
+
+`/sse` no longer exists. It served the HTTP+SSE transport, which this revision reclassifies as formally deprecated, and it was the last thing requiring the Durable Object. Older clients are not stranded by that, since `createMcpHandler` defaults to `legacy: 'stateless'` and still answers requests that arrive without the 2026-07-28 envelope; what stopped working is a client that can speak nothing but HTTP+SSE.
 
 ### Key Files
 
@@ -152,7 +164,7 @@ Some tests deliberately pin behaviour that looks unintended, so that changing it
 
 ```bash
 pnpm dlx @modelcontextprotocol/inspector
-# Connect to: http://localhost:8788/sse
+# Connect to: http://localhost:8788/mcp
 ```
 
 The `minimumReleaseAge` cooldown applies to `pnpm dlx` as well, so this resolves to the newest inspector published more than a week ago. Pinning `@latest` would not change that, only make it misleading.
@@ -166,7 +178,7 @@ Add to Claude Desktop config. Leave the command below as `npx`, not `pnpm dlx`: 
 	"mcpServers": {
 		"zendesk": {
 			"command": "npx",
-			"args": ["mcp-remote", "https://zendesk-mcp-server.<your-subdomain>.workers.dev/sse"]
+			"args": ["mcp-remote", "https://zendesk-mcp-server.<your-subdomain>.workers.dev/mcp"]
 		}
 	}
 }
@@ -189,9 +201,11 @@ To add new Zendesk tools:
    )
    ```
 
-Do not call `server.tool` directly. Everything goes through `createTool` and `registerAllTools`, for two reasons:
+Do not call `server.registerTool` directly. Everything goes through `createTool` and `registerAllTools`, for two reasons:
 
-**The handler's parameters are inferred from the schema, so never annotate them.** `createTool` derives the `params` type from the object literal you pass as the third argument, using the same helper the MCP SDK applies to that schema. Writing the type out by hand creates a second source of truth that nothing reconciles — which is how `create_macro` came to declare a required `value` on an action the schema had always made optional. Spread a shared schema like `paginationSchema` and the handler sees its fields immediately; name a field the schema does not declare and it is a compile error rather than a parameter the server will never populate.
+**The handler's parameters are inferred from the schema, so never annotate them.** `createTool` derives the `params` type from the object literal you pass as the third argument, mirroring the helper the MCP SDK applies to that schema. Writing the type out by hand creates a second source of truth that nothing reconciles — which is how `create_macro` came to declare a required `value` on an action the schema had always made optional. Spread a shared schema like `paginationSchema` and the handler sees its fields immediately; name a field the schema does not declare and it is a compile error rather than a parameter the server will never populate.
+
+Keep passing `createTool` a bare shape. The registry wraps it in `z.object` before handing it on, because SDK v2 deprecates the overload taking a raw `{ field: z.string() }` record even though it still accepts one. Wrapping in one place is what lets every tool definition go on spreading shared shapes.
 
 **Registration is where the publication policy is enforced.** `registerTools` withholds anything that is neither a read nor a named write, as described above. A tool registered directly against the server would skip that check and reach clients whatever it does.
 
@@ -201,13 +215,13 @@ A write tool also has to keep its hands off the response. Handlers return the cl
 
 - `request` throws `ZendeskRequestError`, carrying the HTTP status when the server answered and leaving it undefined when the request never completed. Classify a failure on that status, or on an error's `name` or `code` down the `cause` chain — never by matching the message, which is built out of the Zendesk response body and so cannot tell a status from the same digits quoted inside a body
 - Uses `fetch` API instead of `axios` for Cloudflare Workers compatibility
-- All environment variables are accessed via `this.env` in the Workers context
+- Environment variables arrive as the `env` argument to `fetch` and are threaded from there. There is no `this.env`, because there is no longer a class to hang it on
 - Error handling returns `isError: true` for failed operations
 - TypeScript is used throughout for type safety
 - Authentication is handled at the OAuth level, not per-API-call level
 
 ## Deployment Endpoints
 
-- **SSE Endpoint**: `https://your-worker.workers.dev/sse` (for MCP clients)
+- **MCP Endpoint**: `https://your-worker.workers.dev/mcp` (Streamable HTTP, for MCP clients)
 - **OAuth Authorization**: `https://your-worker.workers.dev/authorize`
 - **Token Endpoint**: `https://your-worker.workers.dev/token`

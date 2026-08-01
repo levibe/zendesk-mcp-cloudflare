@@ -29,7 +29,7 @@ Writing is limited to creating and updating macros. [Available Tools](#available
 ### Technical Features
 
 - **Google OAuth Authentication**: Secure user authentication flow
-- **Remote MCP Protocol**: Server-Sent Events (SSE) connection for real-time communication
+- **Remote MCP Protocol**: Streamable HTTP, stateless — each request stands alone, with no session to establish or keep alive
 - **Cloudflare Workers**: Serverless deployment with global edge distribution
 - **Type Safety**: Full TypeScript implementation with Zod validation
 - **Error Handling**: Comprehensive error handling with user-friendly messages
@@ -148,7 +148,7 @@ An Owner on Team or Enterprise can instead enable the connector for the whole or
 
 Either way the connector follows the account rather than the machine, so it appears in Claude Desktop and at claude.ai both, and `claude_desktop_config.json` is not involved at all.
 
-Use `/mcp` rather than `/sse`. `src/index.ts` mounts both, and `/sse` is the superseded transport kept for older clients — hand a current client `/sse` and it will POST there, take a 404, and fall back.
+`/mcp` is the only endpoint. `/sse` served the superseded HTTP+SSE transport, which MCP revision 2026-07-28 deprecates outright, and it has been removed — a client configured against it now gets nothing. Clients too old to speak the current revision are still served at `/mcp`, so in practice this only strands one that can speak HTTP+SSE and nothing else.
 
 Anthropic's infrastructure makes this connection rather than the user's machine, so the worker has to be reachable over the public internet, which a deployed worker already is. That is also the property that makes this route viable for people who will never open a terminal: nothing runs locally, so there is nothing local to go wrong. `HOSTED_DOMAIN` still governs who may sign in, so a connector does not widen access.
 
