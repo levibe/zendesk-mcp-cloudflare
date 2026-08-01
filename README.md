@@ -2,25 +2,29 @@
 
 This is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/introduction) server that provides comprehensive Zendesk API integration with Google OAuth authentication, deployed on Cloudflare Workers.
 
-The server allows MCP clients (like Claude Desktop) to interact securely with Zendesk APIs through authenticated remote connections, providing tools for ticket management, user administration, search, and more.
+The server allows MCP clients (like Claude Desktop) to interact securely with Zendesk APIs through authenticated remote connections. It reads across tickets, users, organizations, the Help Center and more, and writes only macros.
 
 ## Features
 
 ### Zendesk API Coverage
 
-- **Tickets**: Create, read, update, delete support tickets
-- **Users**: Manage users and user profiles
-- **Organizations**: Handle organization data
-- **Groups**: Manage agent groups
-- **Macros**: Access and manage ticket macros
-- **Views**: Work with ticket views
-- **Triggers**: Manage automation triggers
-- **Automations**: Handle automated workflows
+The server reads widely and writes only macros. Reading covers:
+
+- **Tickets**: List, fetch and search support tickets
+- **Users**: List, fetch and search users
+- **Organizations**: List, fetch and search organizations
+- **Groups**: List and fetch agent groups
+- **Macros**: List and fetch ticket macros
+- **Views**: List and fetch ticket views
+- **Triggers**: List and fetch triggers
+- **Automations**: List and fetch automations
 - **Search**: Search across all Zendesk data
-- **Help Center**: Manage knowledge base articles
-- **Support**: General support operations
-- **Talk**: Access call center data
-- **Chat**: Manage chat interactions
+- **Help Center**: Browse and search the knowledge base — articles, sections and categories
+- **Support**: General configuration information
+- **Talk**: Access call center statistics
+- **Chat**: Read chat conversations
+
+Writing is limited to creating and updating macros. [Available Tools](#available-tools) explains why, and what happens if you ask for anything else.
 
 ### Technical Features
 
@@ -121,7 +125,7 @@ The cooldown in `pnpm-workspace.yaml` applies here too, so this resolves to the 
 - For production: Enter `https://zendesk-mcp.<your-subdomain>.workers.dev/sse`
 - For local: Enter `http://localhost:8788/sse`
 
-Complete the authentication flow and you'll see all Zendesk tools available.
+Complete the authentication flow and you'll see the tools the server publishes.
 
 ## Claude Desktop Integration
 
@@ -141,37 +145,21 @@ Add to your Claude Desktop configuration file. Leave the command below as `npx`,
 After restarting Claude Desktop, authenticate via the browser flow. You can then ask Claude to:
 
 - "Show me the latest support tickets"
-- "Create a new ticket for a customer issue"
 - "Search for tickets about billing problems"
 - "List all users in the Sales organization"
+- "Draft a macro that solves a ticket and thanks the customer"
 
 ## Available Tools
 
-### Ticket Management
+The server reads widely and writes almost nothing.
 
-- `list_tickets` - List tickets with filtering and pagination
-- `get_ticket` - Get specific ticket details
-- `create_ticket` - Create new support tickets
-- `update_ticket` - Update existing tickets
-- `delete_ticket` - Delete tickets
+**Reading** covers tickets, users, organizations, groups, macros, views, triggers, automations, Talk statistics, Chat conversations and the whole Help Center — listing them, fetching one by ID, and searching. Anything named `list_*`, `get_*` or `search_*` is available, along with `search` and `support_info`.
 
-### User Management
+**Writing** is limited to `create_macro` and `update_macro`. A macro is a shortcut an agent applies to a ticket by hand, so creating one changes nothing on its own — which is why these two are permitted where nothing else is.
 
-- `list_users` - List users with role filtering
-- `get_user` - Get user details
-- `create_user` - Create new users
+**Everything else is refused.** Creating, updating and deleting a ticket, and creating a user, an organization or a group, are all written and working in the code but never offered to a client, so asking for them will not work. Nothing else writes at all — deleting a macro, for instance, was never built as a tool. The server logs what it withheld each time it starts.
 
-### Organization Management
-
-- `list_organizations` - List organizations
-- `get_organization` - Get organization details
-- `create_organization` - Create organizations
-
-### Search & Discovery
-
-- `search` - Search across all Zendesk data
-
-[See CLAUDE.md for complete tool documentation]
+The permitted set is decided in `src/utils/tool-registry.ts`, and the tools themselves are defined under `src/tools/`. See CLAUDE.md for how a tool gets permitted.
 
 ## Development
 

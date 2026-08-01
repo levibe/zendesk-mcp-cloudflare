@@ -95,27 +95,20 @@ pnpm exec wrangler kv namespace create "OAUTH_KV"
 # Update wrangler.jsonc with the returned KV ID
 ```
 
-## Available Tools
+## Which tools a client can actually use
 
-The MCP server currently provides these Zendesk tools:
+Tools live in `src/tools/`, one file per Zendesk resource, gathered into `toolCategories` in `src/tools/index.ts`. Defining one there does not publish it, so the list a client sees is shorter than the list in the tree. There is no inventory of either here: read the definitions, or start the server and read the line it logs naming everything it withheld.
 
-### Ticket Management
+Two allowlists in `src/utils/tool-registry.ts` decide, and a tool has to satisfy one of them:
 
-- `list_tickets` - List tickets with pagination and filtering
-- `get_ticket` - Get specific ticket by ID
-- `create_ticket` - Create new support tickets
-- `update_ticket` - Update existing tickets
-- `delete_ticket` - Delete tickets
+- `isReadOnlyTool` covers the query verbs — the `list_`, `get_` and `search_` prefixes, plus `search` and `support_info` by name.
+- `WRITE_TOOLS_ENABLED` names the individual writes permitted anyway. That set is the authority on which ones; today it holds the two macro writes.
 
-### User Management
+Anything satisfying neither is withheld at registration and cannot be reached by any client. `create_ticket` and `delete_ticket` are defined, compiled and covered by the type checker, and no client is ever offered them.
 
-- `list_users` - List users with pagination and role filtering
-- `get_user` - Get specific user by ID
-- `create_user` - Create new users
+Both rules are allowlists rather than denylists on purpose, so a newly added tool stays unexposed until somebody classifies it deliberately. That is why permitting a write means adding its name to the set, and why adding `create_` to the prefixes above would be the wrong shortcut — a prefix publishes every future create tool on the day it is written, which inverts the property the rule exists to hold.
 
-### Search
-
-- `search` - Search across all Zendesk data
+Macro writes are permitted because of what a macro is: it changes nothing when it is created and sits in a menu until an agent applies it to a ticket by hand. A trigger fires on every matching ticket create or update, and an automation runs against every matching ticket on a schedule, so a malformed one reaches customers before anyone reviews it. #20 is where that judgement gets generalised into a permission model, once #22 and #23 have said what the general case needs.
 
 ## Testing
 
@@ -190,7 +183,9 @@ Do not call `server.tool` directly. Everything goes through `createTool` and `re
 
 **The handler's parameters are inferred from the schema, so never annotate them.** `createTool` derives the `params` type from the object literal you pass as the third argument, using the same helper the MCP SDK applies to that schema. Writing the type out by hand creates a second source of truth that nothing reconciles — which is how `create_macro` came to declare a required `value` on an action the schema had always made optional. Spread a shared schema like `paginationSchema` and the handler sees its fields immediately; name a field the schema does not declare and it is a compile error rather than a parameter the server will never populate.
 
-**Registration is where the read-only policy is enforced.** `registerTools` withholds anything that is not a read, via an allowlist of query verbs in `src/utils/tool-registry.ts`. A tool registered directly against the server would skip that check and be exposed to clients.
+**Registration is where the publication policy is enforced.** `registerTools` withholds anything that is neither a read nor a named write, as described above. A tool registered directly against the server would skip that check and reach clients whatever it does.
+
+A write tool also has to keep its hands off the response. Handlers return the client's result and let the single `withErrorHandling` in `registerTools` shape it, the way every read tool does. Calling `withCreateHandling` or its siblings inside a handler builds a second, finished response that the outer wrapper then JSON-encodes — burying `isError` where no client can see it, so a rejected write reads as a successful call. Several withheld write tools still do this, which is #28.
 
 ## Development Notes
 
