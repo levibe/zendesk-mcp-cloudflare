@@ -7,8 +7,9 @@ The server allows MCP clients (like Claude Desktop) to interact securely with Ze
 ## Features
 
 ### Zendesk API Coverage
+
 - **Tickets**: Create, read, update, delete support tickets
-- **Users**: Manage users and user profiles  
+- **Users**: Manage users and user profiles
 - **Organizations**: Handle organization data
 - **Groups**: Manage agent groups
 - **Macros**: Access and manage ticket macros
@@ -22,6 +23,7 @@ The server allows MCP clients (like Claude Desktop) to interact securely with Ze
 - **Chat**: Manage chat interactions
 
 ### Technical Features
+
 - **Google OAuth Authentication**: Secure user authentication flow
 - **Remote MCP Protocol**: Server-Sent Events (SSE) connection for real-time communication
 - **Cloudflare Workers**: Serverless deployment with global edge distribution
@@ -32,12 +34,14 @@ The server allows MCP clients (like Claude Desktop) to interact securely with Ze
 ## Getting Started
 
 ### Prerequisites
+
 - Zendesk instance with API access
 - Google Cloud Platform account for OAuth
 - Cloudflare account for deployment
 - [pnpm](https://pnpm.io/installation), which this project uses as its package manager. The exact version is pinned in `package.json`, and recent versions of pnpm will switch to it for you.
 
 ### 1. Zendesk Setup
+
 1. In your Zendesk Admin Center, go to Apps and integrations > APIs > Zendesk API
 2. Enable token access and generate an API token
 3. Note your Zendesk subdomain (e.g., `company` from `company.zendesk.com`)
@@ -45,19 +49,24 @@ The server allows MCP clients (like Claude Desktop) to interact securely with Ze
 ### 2. Google OAuth Setup
 
 #### For Production
+
 Create a [Google Cloud OAuth App](https://cloud.google.com/iam/docs/workforce-manage-oauth-app):
+
 - Homepage URL: `https://zendesk-mcp.<your-subdomain>.workers.dev`
 - Authorization callback URL: `https://zendesk-mcp.<your-subdomain>.workers.dev/callback`
 - Note your Client ID and generate a Client secret
 
-#### For Local Development  
+#### For Local Development
+
 Create a separate OAuth App for development:
+
 - Homepage URL: `http://localhost:8788`
 - Authorization callback URL: `http://localhost:8788/callback`
 
 ### 3. Environment Setup
 
 Set production secrets via Wrangler:
+
 ```bash
 pnpm exec wrangler secret put GOOGLE_CLIENT_ID
 pnpm exec wrangler secret put GOOGLE_CLIENT_SECRET
@@ -69,6 +78,7 @@ pnpm exec wrangler secret put HOSTED_DOMAIN # Optional: restrict to specific Goo
 ```
 
 For local development, create `.dev.vars`:
+
 ```
 GOOGLE_CLIENT_ID=your_dev_client_id
 GOOGLE_CLIENT_SECRET=your_dev_client_secret
@@ -78,6 +88,7 @@ ZENDESK_API_TOKEN=your_api_token
 ```
 
 ### 4. KV Namespace Setup
+
 ```bash
 pnpm exec wrangler kv namespace create "OAUTH_KV"
 # Update wrangler.jsonc with the returned KV ID
@@ -86,22 +97,27 @@ pnpm exec wrangler kv namespace create "OAUTH_KV"
 ### 5. Deploy & Test
 
 #### Deploy to Production
+
 ```bash
 pnpm install
 pnpm run deploy
 ```
 
 #### Local Development
+
 ```bash
 pnpm install
 pnpm run dev
 ```
 
 #### Test with MCP Inspector
+
 ```bash
 pnpm dlx @modelcontextprotocol/inspector
 ```
+
 The cooldown in `pnpm-workspace.yaml` applies here too, so this resolves to the newest inspector released more than a week ago rather than the absolute newest.
+
 - For production: Enter `https://zendesk-mcp.<your-subdomain>.workers.dev/sse`
 - For local: Enter `http://localhost:8788/sse`
 
@@ -113,19 +129,17 @@ Add to your Claude Desktop configuration file. Leave the command below as `npx`,
 
 ```json
 {
-  "mcpServers": {
-    "zendesk": {
-      "command": "npx",
-      "args": [
-        "mcp-remote",
-        "https://zendesk-mcp.<your-subdomain>.workers.dev/sse"
-      ]
-    }
-  }
+	"mcpServers": {
+		"zendesk": {
+			"command": "npx",
+			"args": ["mcp-remote", "https://zendesk-mcp.<your-subdomain>.workers.dev/sse"]
+		}
+	}
 }
 ```
 
 After restarting Claude Desktop, authenticate via the browser flow. You can then ask Claude to:
+
 - "Show me the latest support tickets"
 - "Create a new ticket for a customer issue"
 - "Search for tickets about billing problems"
@@ -134,23 +148,27 @@ After restarting Claude Desktop, authenticate via the browser flow. You can then
 ## Available Tools
 
 ### Ticket Management
+
 - `list_tickets` - List tickets with filtering and pagination
 - `get_ticket` - Get specific ticket details
 - `create_ticket` - Create new support tickets
 - `update_ticket` - Update existing tickets
 - `delete_ticket` - Delete tickets
 
-### User Management  
+### User Management
+
 - `list_users` - List users with role filtering
 - `get_user` - Get user details
 - `create_user` - Create new users
 
 ### Organization Management
+
 - `list_organizations` - List organizations
 - `get_organization` - Get organization details
 - `create_organization` - Create organizations
 
 ### Search & Discovery
+
 - `search` - Search across all Zendesk data
 
 [See CLAUDE.md for complete tool documentation]
@@ -166,21 +184,23 @@ To extend with additional Zendesk tools:
 3. Export tools from `src/tools/index.ts`
 
 Example:
+
 ```typescript
 // In src/tools/custom.ts
 export const customTools: ToolDefinition[] = [
-  createTool(
-    'my_custom_tool',
-    'Description of what this tool does',
-    { param: z.string().describe('Parameter description') },
-    async (client: ZendeskClient, { param }) => {
-      return client.myCustomMethod(param)
-    }
-  )
+	createTool(
+		'my_custom_tool',
+		'Description of what this tool does',
+		{ param: z.string().describe('Parameter description') },
+		async (client: ZendeskClient, { param }) => {
+			return client.myCustomMethod(param)
+		}
+	),
 ]
 ```
 
 ### Project Structure
+
 ```
 src/
 ├── index.ts              # Main entry point
@@ -202,6 +222,7 @@ This server demonstrates a clean architecture for remote MCP servers:
 - **Type Safety**: Full TypeScript with runtime validation
 
 This pattern can be adapted for other APIs by:
+
 1. Replacing `ZendeskClient` with your API client
 2. Creating new tool definitions in `src/tools/`
 3. Updating environment variables and configuration
@@ -209,6 +230,7 @@ This pattern can be adapted for other APIs by:
 ## Support
 
 For issues and questions:
+
 - Check the [MCP documentation](https://modelcontextprotocol.io/)
 - Review [Cloudflare Workers docs](https://developers.cloudflare.com/workers/)
 - Consult [Zendesk API documentation](https://developer.zendesk.com/api-reference/)

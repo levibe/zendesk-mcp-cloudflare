@@ -1,0 +1,9 @@
+dist
+node_modules
+coverage
+.claude
+.wrangler
+*.d.ts
+pnpm-lock.yaml
+package-lock.json
+yarn.lock

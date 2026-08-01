@@ -18,7 +18,7 @@ minimumReleaseAgeStrict: true
 # verification rejects it on a fresh install. Scoped this way the entry expires
 # by itself: 0.8.4 goes back through the full wait.
 minimumReleaseAgeExclude:
-  - "@cloudflare/workers-oauth-provider@0.8.3"
+  - '@cloudflare/workers-oauth-provider@0.8.3'
 
 # pnpm 11 fails the install outright (ERR_PNPM_IGNORED_BUILDS) unless every
 # package with an install script is answered here. All three normally just

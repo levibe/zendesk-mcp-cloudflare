@@ -15,5 +15,5 @@ export const chatTools: ToolDefinition[] = [
 		async (client: ZendeskClient, params: { page?: number; per_page?: number }) => {
 			return client.listChats(params)
 		}
-	)
+	),
 ]

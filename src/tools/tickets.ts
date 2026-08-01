@@ -12,7 +12,7 @@ import {
 	ticketStatusSchema,
 	ticketTypeSchema,
 	idSchema,
-	tagsSchema
+	tagsSchema,
 } from '../types/zendesk'
 import { createTool } from '../utils/tool-registry'
 import { withCreateHandling, withUpdateHandling, withDeleteHandling } from '../utils/error-handling'
@@ -25,14 +25,17 @@ export const ticketsTools: ToolDefinition[] = [
 		'List tickets in Zendesk',
 		{
 			...paginationSchema,
-			...sortingSchema
+			...sortingSchema,
 		},
-		async (client: ZendeskClient, params: {
-      page?: number;
-      per_page?: number;
-      sort_by?: string;
-      sort_order?: 'asc' | 'desc';
-    }) => {
+		async (
+			client: ZendeskClient,
+			params: {
+				page?: number
+				per_page?: number
+				sort_by?: string
+				sort_order?: 'asc' | 'desc'
+			}
+		) => {
 			return client.listTickets(params)
 		}
 	),
@@ -41,7 +44,7 @@ export const ticketsTools: ToolDefinition[] = [
 		'get_ticket',
 		'Get a specific ticket by ID',
 		{
-			id: idSchema.describe('Ticket ID')
+			id: idSchema.describe('Ticket ID'),
 		},
 		async (client: ZendeskClient, { id }: { id: number }) => {
 			return client.getTicket(id)
@@ -60,19 +63,22 @@ export const ticketsTools: ToolDefinition[] = [
 			assignee_id: z.number().optional().describe('User ID of the assignee'),
 			group_id: z.number().optional().describe('Group ID for the ticket'),
 			type: ticketTypeSchema.optional().describe('Ticket type'),
-			tags: tagsSchema.describe('Tags for the ticket')
+			tags: tagsSchema.describe('Tags for the ticket'),
 		},
-		async (client: ZendeskClient, params: {
-      subject: string;
-      comment: string;
-      priority?: string;
-      status?: string;
-      requester_id?: number;
-      assignee_id?: number;
-      group_id?: number;
-      type?: string;
-      tags?: string[];
-    }) => {
+		async (
+			client: ZendeskClient,
+			params: {
+				subject: string
+				comment: string
+				priority?: string
+				status?: string
+				requester_id?: number
+				assignee_id?: number
+				group_id?: number
+				type?: string
+				tags?: string[]
+			}
+		) => {
 			const ticketData = {
 				subject: params.subject,
 				comment: { body: params.comment },
@@ -82,13 +88,10 @@ export const ticketsTools: ToolDefinition[] = [
 				assignee_id: params.assignee_id,
 				group_id: params.group_id,
 				type: params.type,
-				tags: params.tags
+				tags: params.tags,
 			}
 
-			return withCreateHandling(
-				() => client.createTicket(ticketData),
-				'Ticket'
-			)()
+			return withCreateHandling(() => client.createTicket(ticketData), 'Ticket')()
 		}
 	),
 
@@ -96,33 +99,44 @@ export const ticketsTools: ToolDefinition[] = [
 		'search_tickets',
 		'Search specifically for tickets with ticket-focused parameters',
 		{
-			query: z.string().describe('Search query for tickets (e.g., "urgent", "billing issue", "bug")'),
+			query: z
+				.string()
+				.describe('Search query for tickets (e.g., "urgent", "billing issue", "bug")'),
 			status: ticketStatusSchema.optional().describe('Filter by ticket status'),
 			priority: ticketPrioritySchema.optional().describe('Filter by ticket priority'),
 			type: ticketTypeSchema.optional().describe('Filter by ticket type'),
 			assignee_id: z.number().optional().describe('Filter by assignee user ID'),
 			requester_id: z.number().optional().describe('Filter by requester user ID'),
 			group_id: z.number().optional().describe('Filter by group ID'),
-			created_after: z.string().optional().describe('Filter tickets created after date (ISO format)'),
-			created_before: z.string().optional().describe('Filter tickets created before date (ISO format)'),
+			created_after: z
+				.string()
+				.optional()
+				.describe('Filter tickets created after date (ISO format)'),
+			created_before: z
+				.string()
+				.optional()
+				.describe('Filter tickets created before date (ISO format)'),
 			...sortingSchema,
-			...paginationSchema
+			...paginationSchema,
 		},
-		async (client: ZendeskClient, params: {
-			query: string;
-			status?: string;
-			priority?: string;
-			type?: string;
-			assignee_id?: number;
-			requester_id?: number;
-			group_id?: number;
-			created_after?: string;
-			created_before?: string;
-			sort_by?: string;
-			sort_order?: 'asc' | 'desc';
-			page?: number;
-			per_page?: number;
-		}) => {
+		async (
+			client: ZendeskClient,
+			params: {
+				query: string
+				status?: string
+				priority?: string
+				type?: string
+				assignee_id?: number
+				requester_id?: number
+				group_id?: number
+				created_after?: string
+				created_before?: string
+				sort_by?: string
+				sort_order?: 'asc' | 'desc'
+				page?: number
+				per_page?: number
+			}
+		) => {
 			const { query } = params
 
 			// Build the search query with filters
@@ -138,12 +152,13 @@ export const ticketsTools: ToolDefinition[] = [
 			if (params.created_before) searchQuery += ` created<${params.created_before}`
 
 			return executeSearchWithStandardizedResponse(
-				() => client.search(searchQuery, {
-					sort_by: params.sort_by,
-					sort_order: params.sort_order,
-					page: params.page,
-					per_page: params.per_page
-				}),
+				() =>
+					client.search(searchQuery, {
+						sort_by: params.sort_by,
+						sort_order: params.sort_order,
+						page: params.page,
+						per_page: params.per_page,
+					}),
 				'ticket'
 			)
 		}
@@ -161,19 +176,22 @@ export const ticketsTools: ToolDefinition[] = [
 			assignee_id: z.number().optional().describe('User ID of the new assignee'),
 			group_id: z.number().optional().describe('New group ID for the ticket'),
 			type: ticketTypeSchema.optional().describe('Updated ticket type'),
-			tags: tagsSchema.describe('Updated tags for the ticket')
+			tags: tagsSchema.describe('Updated tags for the ticket'),
 		},
-		async (client: ZendeskClient, params: {
-      id: number;
-      subject?: string;
-      comment?: string;
-      priority?: string;
-      status?: string;
-      assignee_id?: number;
-      group_id?: number;
-      type?: string;
-      tags?: string[];
-    }) => {
+		async (
+			client: ZendeskClient,
+			params: {
+				id: number
+				subject?: string
+				comment?: string
+				priority?: string
+				status?: string
+				assignee_id?: number
+				group_id?: number
+				type?: string
+				tags?: string[]
+			}
+		) => {
 			const ticketData: any = {}
 
 			if (params.subject !== undefined) ticketData.subject = params.subject
@@ -185,10 +203,7 @@ export const ticketsTools: ToolDefinition[] = [
 			if (params.type !== undefined) ticketData.type = params.type
 			if (params.tags !== undefined) ticketData.tags = params.tags
 
-			return withUpdateHandling(
-				() => client.updateTicket(params.id, ticketData),
-				'Ticket'
-			)()
+			return withUpdateHandling(() => client.updateTicket(params.id, ticketData), 'Ticket')()
 		}
 	),
 
@@ -196,14 +211,10 @@ export const ticketsTools: ToolDefinition[] = [
 		'delete_ticket',
 		'Delete a ticket',
 		{
-			id: idSchema.describe('Ticket ID to delete')
+			id: idSchema.describe('Ticket ID to delete'),
 		},
 		async (client: ZendeskClient, { id }: { id: number }) => {
-			return withDeleteHandling(
-				() => client.deleteTicket(id),
-				'Ticket',
-				id
-			)()
+			return withDeleteHandling(() => client.deleteTicket(id), 'Ticket', id)()
 		}
-	)
+	),
 ]

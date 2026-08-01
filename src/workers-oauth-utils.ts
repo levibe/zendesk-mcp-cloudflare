@@ -12,7 +12,7 @@ const ONE_YEAR_IN_SECONDS = 31536000
  * @param data - The data to encode (will be stringified).
  * @returns A URL-safe base64 encoded string.
  */
-function _encodeState (data: any): string {
+function _encodeState(data: any): string {
 	try {
 		const jsonString = JSON.stringify(data)
 		// Use btoa for simplicity, assuming Worker environment supports it well enough
@@ -29,7 +29,7 @@ function _encodeState (data: any): string {
  * @param encoded - The URL-safe base64 encoded string.
  * @returns The original data.
  */
-function decodeState<T = any> (encoded: string): T {
+function decodeState<T = any>(encoded: string): T {
 	try {
 		const jsonString = atob(encoded)
 		return JSON.parse(jsonString)
@@ -44,11 +44,9 @@ function decodeState<T = any> (encoded: string): T {
  * @param secret - The raw secret key string.
  * @returns A promise resolving to the CryptoKey object.
  */
-async function importKey (secret: string): Promise<CryptoKey> {
+async function importKey(secret: string): Promise<CryptoKey> {
 	if (!secret) {
-		throw new Error(
-			'COOKIE_SECRET is not defined. A secret key is required for signing cookies.',
-		)
+		throw new Error('COOKIE_SECRET is not defined. A secret key is required for signing cookies.')
 	}
 	const enc = new TextEncoder()
 	return crypto.subtle.importKey(
@@ -56,7 +54,7 @@ async function importKey (secret: string): Promise<CryptoKey> {
 		enc.encode(secret),
 		{ hash: 'SHA-256', name: 'HMAC' },
 		false, // not extractable
-		['sign', 'verify'], // key usages
+		['sign', 'verify'] // key usages
 	)
 }
 
@@ -66,7 +64,7 @@ async function importKey (secret: string): Promise<CryptoKey> {
  * @param data - The string data to sign.
  * @returns A promise resolving to the signature as a hex string.
  */
-async function signData (key: CryptoKey, data: string): Promise<string> {
+async function signData(key: CryptoKey, data: string): Promise<string> {
 	const enc = new TextEncoder()
 	const signatureBuffer = await crypto.subtle.sign('HMAC', key, enc.encode(data))
 	// Convert ArrayBuffer to hex string
@@ -82,16 +80,16 @@ async function signData (key: CryptoKey, data: string): Promise<string> {
  * @param data - The original data that was signed.
  * @returns A promise resolving to true if the signature is valid, false otherwise.
  */
-async function verifySignature (
+async function verifySignature(
 	key: CryptoKey,
 	signatureHex: string,
-	data: string,
+	data: string
 ): Promise<boolean> {
 	const enc = new TextEncoder()
 	try {
 		// Convert hex signature back to ArrayBuffer
 		const signatureBytes = new Uint8Array(
-			signatureHex.match(/.{1,2}/g)!.map((byte) => Number.parseInt(byte, 16)),
+			signatureHex.match(/.{1,2}/g)!.map((byte) => Number.parseInt(byte, 16))
 		)
 		return await crypto.subtle.verify('HMAC', key, signatureBytes.buffer, enc.encode(data))
 	} catch (e) {
@@ -107,9 +105,9 @@ async function verifySignature (
  * @param secret - The secret key used for signing.
  * @returns A promise resolving to the list of approved client IDs if the cookie is valid, otherwise null.
  */
-async function getApprovedClientsFromCookie (
+async function getApprovedClientsFromCookie(
 	cookieHeader: string | null,
-	secret: string,
+	secret: string
 ): Promise<string[] | null> {
 	if (!cookieHeader) return null
 
@@ -166,10 +164,10 @@ async function getApprovedClientsFromCookie (
  * @param cookieSecret - The secret key used to sign/verify the approval cookie.
  * @returns A promise resolving to true if the client ID is in the list of approved clients in a valid cookie, false otherwise.
  */
-export async function clientIdAlreadyApproved (
+export async function clientIdAlreadyApproved(
 	request: Request,
 	clientId: string,
-	cookieSecret: string,
+	cookieSecret: string
 ): Promise<boolean> {
 	if (!clientId) return false
 	const cookieHeader = request.headers.get('Cookie')
@@ -185,46 +183,46 @@ export interface ApprovalDialogOptions {
 	/**
 	 * Client information to display in the approval dialog
 	 */
-	client: ClientInfo | null;
+	client: ClientInfo | null
 	/**
 	 * Server information to display in the approval dialog
 	 */
 	server: {
-		name: string;
-		logo?: string;
-		description?: string;
-	};
+		name: string
+		logo?: string
+		description?: string
+	}
 	/**
 	 * Arbitrary state data to pass through the approval flow
 	 * Will be encoded in the form and returned when approval is complete
 	 */
-	state: Record<string, any>;
+	state: Record<string, any>
 	/**
 	 * Name of the cookie to use for storing approvals
 	 * @default "mcp_approved_clients"
 	 */
-	cookieName?: string;
+	cookieName?: string
 	/**
 	 * Secret used to sign cookies for verification
 	 * Can be a string or Uint8Array
 	 * @default Built-in Uint8Array key
 	 */
-	cookieSecret?: string | Uint8Array;
+	cookieSecret?: string | Uint8Array
 	/**
 	 * Cookie domain
 	 * @default current domain
 	 */
-	cookieDomain?: string;
+	cookieDomain?: string
 	/**
 	 * Cookie path
 	 * @default "/"
 	 */
-	cookiePath?: string;
+	cookiePath?: string
 	/**
 	 * Cookie max age in seconds
 	 * @default 30 days
 	 */
-	cookieMaxAge?: number;
+	cookieMaxAge?: number
 }
 
 /**
@@ -236,7 +234,7 @@ export interface ApprovalDialogOptions {
  * @param options - Configuration for the approval dialog
  * @returns A Response containing the HTML approval dialog
  */
-export function renderApprovalDialog (request: Request, options: ApprovalDialogOptions): Response {
+export function renderApprovalDialog(request: Request, options: ApprovalDialogOptions): Response {
 	const { client, server, state } = options
 
 	// Encode state for form submission
@@ -255,9 +253,7 @@ export function renderApprovalDialog (request: Request, options: ApprovalDialogO
 
 	// Client contacts
 	const contacts =
-		client?.contacts && client.contacts.length > 0
-			? sanitizeHtml(client.contacts.join(', '))
-			: ''
+		client?.contacts && client.contacts.length > 0 ? sanitizeHtml(client.contacts.join(', ')) : ''
 
 	// Get redirect URIs
 	const redirectUris =
@@ -471,8 +467,8 @@ export function renderApprovalDialog (request: Request, options: ApprovalDialogO
               </div>
               
               ${
-	clientUri
-		? `
+								clientUri
+									? `
                 <div class="client-detail">
                   <div class="detail-label">Website:</div>
                   <div class="detail-value small">
@@ -482,12 +478,12 @@ export function renderApprovalDialog (request: Request, options: ApprovalDialogO
                   </div>
                 </div>
               `
-		: ''
-}
+									: ''
+							}
               
               ${
-	policyUri
-		? `
+								policyUri
+									? `
                 <div class="client-detail">
                   <div class="detail-label">Privacy Policy:</div>
                   <div class="detail-value">
@@ -497,12 +493,12 @@ export function renderApprovalDialog (request: Request, options: ApprovalDialogO
                   </div>
                 </div>
               `
-		: ''
-}
+									: ''
+							}
               
               ${
-	tosUri
-		? `
+								tosUri
+									? `
                 <div class="client-detail">
                   <div class="detail-label">Terms of Service:</div>
                   <div class="detail-value">
@@ -512,12 +508,12 @@ export function renderApprovalDialog (request: Request, options: ApprovalDialogO
                   </div>
                 </div>
               `
-		: ''
-}
+									: ''
+							}
               
               ${
-	redirectUris.length > 0
-		? `
+								redirectUris.length > 0
+									? `
                 <div class="client-detail">
                   <div class="detail-label">Redirect URIs:</div>
                   <div class="detail-value small">
@@ -525,19 +521,19 @@ export function renderApprovalDialog (request: Request, options: ApprovalDialogO
                   </div>
                 </div>
               `
-		: ''
-}
+									: ''
+							}
               
               ${
-	contacts
-		? `
+								contacts
+									? `
                 <div class="client-detail">
                   <div class="detail-label">Contact:</div>
                   <div class="detail-value">${contacts}</div>
                 </div>
               `
-		: ''
-}
+									: ''
+							}
             </div>
             
             <p>This MCP Client is requesting to be authorized on ${serverName}. If you approve, you will be redirected to complete authentication.</p>
@@ -568,9 +564,9 @@ export function renderApprovalDialog (request: Request, options: ApprovalDialogO
  */
 export interface ParsedApprovalResult {
 	/** The original state object passed through the form. */
-	state: any;
+	state: any
 	/** Headers to set on the redirect response, including the Set-Cookie header. */
-	headers: Record<string, string>;
+	headers: Record<string, string>
 }
 
 /**
@@ -582,9 +578,9 @@ export interface ParsedApprovalResult {
  * @returns A promise resolving to an object containing the parsed state and necessary headers.
  * @throws If the request method is not POST, form data is invalid, or state is missing.
  */
-export async function parseRedirectApproval (
+export async function parseRedirectApproval(
 	request: Request,
-	cookieSecret: string,
+	cookieSecret: string
 ): Promise<ParsedApprovalResult> {
 	if (request.method !== 'POST') {
 		throw new Error('Invalid request method. Expected POST.')
@@ -598,7 +594,7 @@ export async function parseRedirectApproval (
 		const encodedState = formData.get('state')
 
 		if (typeof encodedState !== 'string' || !encodedState) {
-			throw new Error('Missing or invalid \'state\' in form data.')
+			throw new Error("Missing or invalid 'state' in form data.")
 		}
 
 		state = decodeState<{ oauthReqInfo?: AuthRequest }>(encodedState) // Decode the state
@@ -610,9 +606,7 @@ export async function parseRedirectApproval (
 	} catch (e) {
 		console.error('Error processing form submission:', e)
 		// Rethrow or handle as appropriate, maybe return a specific error response
-		throw new Error(
-			`Failed to parse approval form: ${e instanceof Error ? e.message : String(e)}`,
-		)
+		throw new Error(`Failed to parse approval form: ${e instanceof Error ? e.message : String(e)}`)
 	}
 
 	// Get existing approved clients
@@ -642,7 +636,7 @@ export async function parseRedirectApproval (
  * @param unsafe - The unsafe string that might contain HTML
  * @returns A safe string with HTML special characters escaped
  */
-function sanitizeHtml (unsafe: string): string {
+function sanitizeHtml(unsafe: string): string {
 	return unsafe
 		.replace(/&/g, '&amp;')
 		.replace(/</g, '&lt;')

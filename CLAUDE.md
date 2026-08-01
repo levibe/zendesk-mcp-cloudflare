@@ -29,13 +29,29 @@ This project uses pnpm, pinned via the `packageManager` field in `package.json`.
 `.nvmrc` deliberately names the major (`22`) rather than a full version, because both `nvm use` and `actions/setup-node` read a partial version as a range and would pin the old `22.13.x` line. The `>=22.13` floor in `engines` matches pnpm's own requirement and is advisory, since `engine-strict` is off by default. It rarely needs enforcing: pnpm 11 exits outright below Node 22.13, with Node 20 the one exception, where it warns and carries on.
 
 ### Local Development
+
 ```bash
 pnpm install             # Install dependencies
 pnpm run dev             # Start local development server (localhost:8788)
 pnpm run type-check      # Run TypeScript type checking
 ```
 
+### Code Quality
+
+Prettier owns formatting and ESLint owns everything else. ESLint's formatting rules are switched off through `eslint-config-prettier`, so the two never disagree — don't add stylistic rules back to `eslint.config.mjs`.
+
+```bash
+pnpm run format          # Format the repository with Prettier
+pnpm run format:check    # Check formatting without writing (used by validate)
+pnpm run lint            # Lint src/ with ESLint
+pnpm run lint:fix        # Lint and auto-fix
+pnpm run validate        # type-check, lint, format:check and build together
+```
+
+`no-explicit-any` is set to warn rather than error, so `pnpm run lint` currently reports 66 warnings and still exits clean.
+
 ### Deployment
+
 ```bash
 pnpm run deploy      # Deploy to Cloudflare Workers
 ```
@@ -43,7 +59,9 @@ pnpm run deploy      # Deploy to Cloudflare Workers
 ### Environment Setup
 
 #### Required Secrets (for production)
+
 Set these via `pnpm exec wrangler secret put <SECRET_NAME>`:
+
 - `GOOGLE_CLIENT_ID` - Google OAuth client ID
 - `GOOGLE_CLIENT_SECRET` - Google OAuth client secret
 - `COOKIE_ENCRYPTION_KEY` - Random string for cookie encryption
@@ -53,7 +71,9 @@ Set these via `pnpm exec wrangler secret put <SECRET_NAME>`:
 - `HOSTED_DOMAIN` - (Optional) Restrict to specific Google domain
 
 #### Local Development Setup
+
 Create `.dev.vars` file:
+
 ```
 GOOGLE_CLIENT_ID=your_dev_client_id
 GOOGLE_CLIENT_SECRET=your_dev_client_secret
@@ -63,6 +83,7 @@ ZENDESK_API_TOKEN=your_token
 ```
 
 #### KV Namespace Setup
+
 ```bash
 pnpm exec wrangler kv namespace create "OAUTH_KV"
 # Update wrangler.jsonc with the returned KV ID
@@ -73,6 +94,7 @@ pnpm exec wrangler kv namespace create "OAUTH_KV"
 The MCP server currently provides these Zendesk tools:
 
 ### Ticket Management
+
 - `list_tickets` - List tickets with pagination and filtering
 - `get_ticket` - Get specific ticket by ID
 - `create_ticket` - Create new support tickets
@@ -80,35 +102,38 @@ The MCP server currently provides these Zendesk tools:
 - `delete_ticket` - Delete tickets
 
 ### User Management
+
 - `list_users` - List users with pagination and role filtering
 - `get_user` - Get specific user by ID
 - `create_user` - Create new users
 
 ### Search
+
 - `search` - Search across all Zendesk data
 
 ## Testing
 
 ### Local Testing with MCP Inspector
+
 ```bash
 pnpm dlx @modelcontextprotocol/inspector
 # Connect to: http://localhost:8788/sse
 ```
+
 The `minimumReleaseAge` cooldown applies to `pnpm dlx` as well, so this resolves to the newest inspector published more than a week ago. Pinning `@latest` would not change that, only make it misleading.
 
 ### Claude Desktop Integration
+
 Add to Claude Desktop config. Leave the command below as `npx`, not `pnpm dlx`: it runs on the end user's machine, where Node is a safe assumption but pnpm is not. The pnpm commands elsewhere in this file are for working on the server itself.
+
 ```json
 {
-  "mcpServers": {
-    "zendesk": {
-      "command": "npx",
-      "args": [
-        "mcp-remote",
-        "https://zendesk-mcp-server.<your-subdomain>.workers.dev/sse"
-      ]
-    }
-  }
+	"mcpServers": {
+		"zendesk": {
+			"command": "npx",
+			"args": ["mcp-remote", "https://zendesk-mcp-server.<your-subdomain>.workers.dev/sse"]
+		}
+	}
 }
 ```
 

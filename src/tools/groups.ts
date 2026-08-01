@@ -32,10 +32,10 @@ export const groupsTools: ToolDefinition[] = [
 		'Create a new agent group',
 		{
 			name: nameSchema.describe('Group name'),
-			description: descriptionSchema.describe('Group description')
+			description: descriptionSchema.describe('Group description'),
 		},
 		async (client: ZendeskClient, params: { name: string; description?: string }) => {
 			return withCreateHandling(() => client.createGroup(params), 'Group')()
 		}
-	)
+	),
 ]

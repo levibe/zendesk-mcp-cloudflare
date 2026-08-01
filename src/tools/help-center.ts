@@ -15,14 +15,17 @@ export const helpCenterTools: ToolDefinition[] = [
 		'List Help Center articles',
 		{
 			...paginationSchema,
-			...sortingSchema
+			...sortingSchema,
 		},
-		async (client: ZendeskClient, params: {
-      page?: number;
-      per_page?: number;
-      sort_by?: string;
-      sort_order?: 'asc' | 'desc';
-    }) => {
+		async (
+			client: ZendeskClient,
+			params: {
+				page?: number
+				per_page?: number
+				sort_by?: string
+				sort_order?: 'asc' | 'desc'
+			}
+		) => {
 			return client.listArticles(params)
 		}
 	),
@@ -41,13 +44,16 @@ export const helpCenterTools: ToolDefinition[] = [
 		'Search knowledge base articles and help content',
 		{
 			query: z.string().describe('Search query for articles (e.g., "password reset", "billing")'),
-			...paginationSchema
+			...paginationSchema,
 		},
-		async (client: ZendeskClient, params: {
-      query: string;
-      page?: number;
-      per_page?: number;
-    }) => {
+		async (
+			client: ZendeskClient,
+			params: {
+				query: string
+				page?: number
+				per_page?: number
+			}
+		) => {
 			const { query, ...searchParams } = params
 			return executeSearchWithStandardizedResponse(
 				() => client.searchArticles({ query, ...searchParams }),
@@ -62,14 +68,17 @@ export const helpCenterTools: ToolDefinition[] = [
 		'List Help Center categories to understand content hierarchy',
 		{
 			...paginationSchema,
-			...sortingSchema
+			...sortingSchema,
 		},
-		async (client: ZendeskClient, params: {
-			page?: number;
-			per_page?: number;
-			sort_by?: string;
-			sort_order?: 'asc' | 'desc';
-		}) => {
+		async (
+			client: ZendeskClient,
+			params: {
+				page?: number
+				per_page?: number
+				sort_by?: string
+				sort_order?: 'asc' | 'desc'
+			}
+		) => {
 			return client.listCategories(params)
 		}
 	),
@@ -88,19 +97,23 @@ export const helpCenterTools: ToolDefinition[] = [
 		'Search Help Center categories to explore content organization',
 		{
 			query: z.string().describe('Search query for categories (e.g., "billing", "technical")'),
-			...paginationSchema
+			...paginationSchema,
 		},
-		async (client: ZendeskClient, params: {
-			query: string;
-			page?: number;
-			per_page?: number;
-		}) => {
+		async (
+			client: ZendeskClient,
+			params: {
+				query: string
+				page?: number
+				per_page?: number
+			}
+		) => {
 			// Use general search with type filter for categories
 			return executeSearchWithStandardizedResponse(
-				() => client.search(`type:topic ${params.query}`, {
-					page: params.page,
-					per_page: params.per_page
-				}),
+				() =>
+					client.search(`type:topic ${params.query}`, {
+						page: params.page,
+						per_page: params.per_page,
+					}),
 				'category'
 			)
 		}
@@ -113,15 +126,18 @@ export const helpCenterTools: ToolDefinition[] = [
 		{
 			category_id: z.number().optional().describe('Filter sections by category ID'),
 			...paginationSchema,
-			...sortingSchema
+			...sortingSchema,
 		},
-		async (client: ZendeskClient, params: {
-			category_id?: number;
-			page?: number;
-			per_page?: number;
-			sort_by?: string;
-			sort_order?: 'asc' | 'desc';
-		}) => {
+		async (
+			client: ZendeskClient,
+			params: {
+				category_id?: number
+				page?: number
+				per_page?: number
+				sort_by?: string
+				sort_order?: 'asc' | 'desc'
+			}
+		) => {
 			if (params.category_id) {
 				const { category_id, ...otherParams } = params
 				return client.listSectionsByCategory(category_id, otherParams)
@@ -143,16 +159,21 @@ export const helpCenterTools: ToolDefinition[] = [
 		'search_sections',
 		'Search Help Center sections to find specific content areas',
 		{
-			query: z.string().describe('Search query for sections (e.g., "getting started", "troubleshooting")'),
+			query: z
+				.string()
+				.describe('Search query for sections (e.g., "getting started", "troubleshooting")'),
 			category_id: z.number().optional().describe('Limit search to specific category'),
-			...paginationSchema
+			...paginationSchema,
 		},
-		async (client: ZendeskClient, params: {
-			query: string;
-			category_id?: number;
-			page?: number;
-			per_page?: number;
-		}) => {
+		async (
+			client: ZendeskClient,
+			params: {
+				query: string
+				category_id?: number
+				page?: number
+				per_page?: number
+			}
+		) => {
 			// Build search query
 			let searchQuery = `type:topic ${params.query}`
 			if (params.category_id) {
@@ -160,10 +181,11 @@ export const helpCenterTools: ToolDefinition[] = [
 			}
 
 			return executeSearchWithStandardizedResponse(
-				() => client.search(searchQuery, {
-					page: params.page,
-					per_page: params.per_page
-				}),
+				() =>
+					client.search(searchQuery, {
+						page: params.page,
+						per_page: params.per_page,
+					}),
 				'section'
 			)
 		}
@@ -174,13 +196,19 @@ export const helpCenterTools: ToolDefinition[] = [
 		'get_help_center_hierarchy',
 		'Get the complete Help Center content hierarchy (categories > sections > articles)',
 		{
-			include_articles: z.boolean().optional().describe('Include articles in the hierarchy (default: false)'),
-			category_id: z.number().optional().describe('Limit to specific category')
+			include_articles: z
+				.boolean()
+				.optional()
+				.describe('Include articles in the hierarchy (default: false)'),
+			category_id: z.number().optional().describe('Limit to specific category'),
 		},
-		async (client: ZendeskClient, params: {
-			include_articles?: boolean;
-			category_id?: number;
-		}) => {
+		async (
+			client: ZendeskClient,
+			params: {
+				include_articles?: boolean
+				category_id?: number
+			}
+		) => {
 			try {
 				// Get categories
 				const categoriesResponse = params.category_id
@@ -199,19 +227,19 @@ export const helpCenterTools: ToolDefinition[] = [
 
 						const sectionsWithArticles = params.include_articles
 							? await Promise.all(
-								sections.map(async (section: any) => {
-									const articlesResponse = await client.listArticlesBySection(section.id)
-									return {
-										...section,
-										articles: articlesResponse.articles || []
-									}
-								})
-							)
+									sections.map(async (section: any) => {
+										const articlesResponse = await client.listArticlesBySection(section.id)
+										return {
+											...section,
+											articles: articlesResponse.articles || [],
+										}
+									})
+								)
 							: sections
 
 						return {
 							...category,
-							sections: sectionsWithArticles
+							sections: sectionsWithArticles,
 						}
 					})
 				)
@@ -222,10 +250,15 @@ export const helpCenterTools: ToolDefinition[] = [
 					total_sections: hierarchy.reduce((sum, cat) => sum + cat.sections.length, 0),
 					...(params.include_articles && {
 						total_articles: hierarchy.reduce(
-							(sum, cat) => sum + cat.sections.reduce((secSum: number, sec: any) => secSum + (sec.articles?.length || 0), 0),
+							(sum, cat) =>
+								sum +
+								cat.sections.reduce(
+									(secSum: number, sec: any) => secSum + (sec.articles?.length || 0),
+									0
+								),
 							0
-						)
-					})
+						),
+					}),
 				}
 			} catch (error) {
 				return { error: 'Failed to fetch Help Center hierarchy', details: error }
@@ -239,17 +272,20 @@ export const helpCenterTools: ToolDefinition[] = [
 		{
 			section_id: idSchema.describe('Section ID'),
 			...paginationSchema,
-			...sortingSchema
+			...sortingSchema,
 		},
-		async (client: ZendeskClient, params: {
-			section_id: number;
-			page?: number;
-			per_page?: number;
-			sort_by?: string;
-			sort_order?: 'asc' | 'desc';
-		}) => {
+		async (
+			client: ZendeskClient,
+			params: {
+				section_id: number
+				page?: number
+				per_page?: number
+				sort_by?: string
+				sort_order?: 'asc' | 'desc'
+			}
+		) => {
 			const { section_id, ...otherParams } = params
 			return client.listArticlesBySection(section_id, otherParams)
 		}
-	)
+	),
 ]

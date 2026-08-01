@@ -5,21 +5,21 @@
 import type {
 	SearchResponseMetadata,
 	StandardizedSearchResult,
-	StandardizedSearchResponse
+	StandardizedSearchResponse,
 } from '../types/zendesk'
 
 /**
  * Standardizes search response format by adding result_type to each result
  * and organizing metadata consistently
  */
-export function standardizeSearchResponse (
+export function standardizeSearchResponse(
 	rawResponse: any,
 	defaultResultType?: string
 ): StandardizedSearchResponse {
 	if (!rawResponse || typeof rawResponse !== 'object') {
 		return {
 			results: [],
-			metadata: {}
+			metadata: {},
 		}
 	}
 
@@ -55,20 +55,20 @@ export function standardizeSearchResponse (
 
 		return {
 			...result,
-			result_type: resultType
+			result_type: resultType,
 		}
 	})
 
 	// Standardize metadata
 	const metadata: SearchResponseMetadata = {
-		total_count: rawResponse.count || results.length
+		total_count: rawResponse.count || results.length,
 	}
 
 	// Add pagination info if available
 	if (rawResponse.next_page || rawResponse.previous_page) {
 		metadata.page_info = {
 			has_next_page: !!rawResponse.next_page,
-			has_previous_page: !!rawResponse.previous_page
+			has_previous_page: !!rawResponse.previous_page,
 		}
 	}
 
@@ -77,14 +77,14 @@ export function standardizeSearchResponse (
 		metadata,
 		count: rawResponse.count,
 		next_page: rawResponse.next_page || null,
-		previous_page: rawResponse.previous_page || null
+		previous_page: rawResponse.previous_page || null,
 	}
 }
 
 /**
  * Wrapper function for search operations that automatically standardizes the response
  */
-export async function executeSearchWithStandardizedResponse (
+export async function executeSearchWithStandardizedResponse(
 	searchOperation: () => Promise<any>,
 	defaultResultType?: string
 ): Promise<StandardizedSearchResponse> {
@@ -98,14 +98,17 @@ export async function executeSearchWithStandardizedResponse (
 
 		// Structured logging for Cloudflare Workers observability
 		console.error('Search operation failed', {
-			error: error instanceof Error ? {
-				message: error.message,
-				stack: error.stack,
-				cause: error.cause
-			} : String(error),
+			error:
+				error instanceof Error
+					? {
+							message: error.message,
+							stack: error.stack,
+							cause: error.cause,
+						}
+					: String(error),
 			defaultResultType,
 			duration,
-			timestamp: new Date().toISOString()
+			timestamp: new Date().toISOString(),
 		})
 
 		// Enhanced error response with detailed metadata for MCP clients
@@ -115,14 +118,13 @@ export async function executeSearchWithStandardizedResponse (
 		const errorMetadata: any = {
 			error: errorMessage,
 			errorType,
-			duration
+			duration,
 		}
 
 		// Include error cause chain if available
 		if (error instanceof Error && error.cause) {
-			errorMetadata.errorCause = error.cause instanceof Error
-				? error.cause.message
-				: String(error.cause)
+			errorMetadata.errorCause =
+				error.cause instanceof Error ? error.cause.message : String(error.cause)
 		}
 
 		return {
@@ -130,7 +132,7 @@ export async function executeSearchWithStandardizedResponse (
 			metadata: errorMetadata,
 			count: 0,
 			next_page: null,
-			previous_page: null
+			previous_page: null,
 		}
 	}
 }

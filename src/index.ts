@@ -9,21 +9,21 @@ import { registerAllTools } from './utils/tool-registry'
 // Context from the auth process, encrypted & stored in the auth token
 // and provided to the MyMCP as this.props
 type Props = {
-	name: string;
-	email: string;
-	accessToken: string;
-};
+	name: string
+	email: string
+	accessToken: string
+}
 
 export class MyMCP extends McpAgent<Env, Record<string, never>, Props> {
 	server = new McpServer({
 		name: 'Zendesk API Server',
 		version: '1.0.0',
-		description: 'Remote MCP Server for interacting with the Zendesk API'
+		description: 'Remote MCP Server for interacting with the Zendesk API',
 	})
 
 	private zendeskClient!: ZendeskClient
 
-	async init () {
+	async init() {
 		// Initialize Zendesk client with environment variables
 		this.zendeskClient = new ZendeskClient(undefined, this.env)
 
