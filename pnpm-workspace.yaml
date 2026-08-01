@@ -1,0 +1,37 @@
+# pnpm reads its settings from this file. An equivalent "pnpm" block in
+# package.json is silently ignored, so settings belong here.
+
+# Minutes — 10080 is 7 days. pnpm 11 already waits 1 day by default; this
+# widens that window, since compromised releases are usually caught and pulled
+# within hours. `pnpm install --trust-lockfile` skips the check, but it trusts
+# every entry at once, so the targeted exclusion below is preferred.
+minimumReleaseAge: 10080
+
+# pnpm turns this on by default once minimumReleaseAge is set explicitly. Stated
+# here so the behaviour is visible: when no version satisfies the window, the
+# install fails rather than quietly falling back to one that doesn't.
+minimumReleaseAgeStrict: true
+
+# Pinned to the exact version rather than the bare package name, which would
+# exempt every future release too. Issue #1 upgraded to 0.8.3 (published
+# 2026-07-29) while it was still inside the window above, and lockfile
+# verification rejects it on a fresh install. Scoped this way the entry expires
+# by itself: 0.8.4 goes back through the full wait.
+minimumReleaseAgeExclude:
+  - "@cloudflare/workers-oauth-provider@0.8.3"
+
+# pnpm 11 fails the install outright (ERR_PNPM_IGNORED_BUILDS) unless every
+# package with an install script is answered here. All three normally just
+# fetch or link a prebuilt platform binary — except sharp, which falls back to
+# a node-gyp build from source when a global libvips is on the machine.
+allowBuilds:
+  esbuild: true
+  sharp: true
+  workerd: true
+
+# Reinstall when node_modules has drifted from the lockfile, rather than only
+# complaining. This repo has no pre-commit hooks, so it is the only local guard.
+# `install` rather than `error` because editing minimumReleaseAgeExclude above
+# marks node_modules stale, so `error` would fail the next script run with
+# ERR_PNPM_VERIFY_DEPS_BEFORE_RUN the moment someone deletes the pinned entry.
+verifyDepsBeforeRun: install

@@ -15,7 +15,7 @@
         /* Specify how TypeScript looks up a file from a given module specifier. */
         "moduleResolution": "bundler",
         /* Bindings and runtime types both come from the generated worker-configuration.d.ts
-           (npm run cf-typegen), so the runtime types match the compatibility date in
+           (pnpm run cf-typegen), so the runtime types match the compatibility date in
            wrangler.jsonc. Regenerate after changing bindings or the compatibility date. */
         "types": ["./worker-configuration.d.ts"],
         /* Enable importing .json files */

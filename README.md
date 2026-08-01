@@ -35,6 +35,7 @@ The server allows MCP clients (like Claude Desktop) to interact securely with Ze
 - Zendesk instance with API access
 - Google Cloud Platform account for OAuth
 - Cloudflare account for deployment
+- [pnpm](https://pnpm.io/installation), which this project uses as its package manager. The exact version is pinned in `package.json`, and recent versions of pnpm will switch to it for you.
 
 ### 1. Zendesk Setup
 1. In your Zendesk Admin Center, go to Apps and integrations > APIs > Zendesk API
@@ -58,13 +59,13 @@ Create a separate OAuth App for development:
 
 Set production secrets via Wrangler:
 ```bash
-wrangler secret put GOOGLE_CLIENT_ID
-wrangler secret put GOOGLE_CLIENT_SECRET
-wrangler secret put COOKIE_ENCRYPTION_KEY # Random string, e.g. openssl rand -hex 32
-wrangler secret put ZENDESK_SUBDOMAIN
-wrangler secret put ZENDESK_EMAIL
-wrangler secret put ZENDESK_API_TOKEN
-wrangler secret put HOSTED_DOMAIN # Optional: restrict to specific Google domain
+pnpm exec wrangler secret put GOOGLE_CLIENT_ID
+pnpm exec wrangler secret put GOOGLE_CLIENT_SECRET
+pnpm exec wrangler secret put COOKIE_ENCRYPTION_KEY # Random string, e.g. openssl rand -hex 32
+pnpm exec wrangler secret put ZENDESK_SUBDOMAIN
+pnpm exec wrangler secret put ZENDESK_EMAIL
+pnpm exec wrangler secret put ZENDESK_API_TOKEN
+pnpm exec wrangler secret put HOSTED_DOMAIN # Optional: restrict to specific Google domain
 ```
 
 For local development, create `.dev.vars`:
@@ -78,7 +79,7 @@ ZENDESK_API_TOKEN=your_api_token
 
 ### 4. KV Namespace Setup
 ```bash
-wrangler kv:namespace create "OAUTH_KV"
+pnpm exec wrangler kv namespace create "OAUTH_KV"
 # Update wrangler.jsonc with the returned KV ID
 ```
 
@@ -86,8 +87,8 @@ wrangler kv:namespace create "OAUTH_KV"
 
 #### Deploy to Production
 ```bash
-npm install
-npx wrangler deploy
+pnpm install
+pnpm run deploy
 ```
 
 #### Local Development
@@ -98,8 +99,9 @@ pnpm run dev
 
 #### Test with MCP Inspector
 ```bash
-npx @modelcontextprotocol/inspector@latest
+pnpm dlx @modelcontextprotocol/inspector
 ```
+The cooldown in `pnpm-workspace.yaml` applies here too, so this resolves to the newest inspector released more than a week ago rather than the absolute newest.
 - For production: Enter `https://zendesk-mcp.<your-subdomain>.workers.dev/sse`
 - For local: Enter `http://localhost:8788/sse`
 
@@ -107,7 +109,7 @@ Complete the authentication flow and you'll see all Zendesk tools available.
 
 ## Claude Desktop Integration
 
-Add to your Claude Desktop configuration file:
+Add to your Claude Desktop configuration file. Leave the command below as `npx`, not `pnpm dlx`: it runs on your own machine when Claude Desktop starts the server, where Node ships `npx` but pnpm may not be installed at all.
 
 ```json
 {
