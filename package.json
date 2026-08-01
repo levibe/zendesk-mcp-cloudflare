@@ -17,6 +17,8 @@
 		"lint:fix": "eslint src/ --fix",
 		"format": "prettier --write .",
 		"format:check": "prettier --check .",
+		"test": "vitest run",
+		"test:watch": "vitest",
 		"build": "wrangler deploy --dry-run",
 		"validate": "pnpm run type-check && pnpm run lint && pnpm run format:check && pnpm run build"
 	},
@@ -36,6 +38,7 @@
 		"prettier": "^3.6.2",
 		"typescript": "^5.8.3",
 		"typescript-eslint": "^8.65.0",
+		"vitest": "^4.1.10",
 		"wrangler": "^4.22.0"
 	}
 }
