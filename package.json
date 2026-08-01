@@ -4,6 +4,9 @@
 	"type": "module",
 	"private": true,
 	"packageManager": "pnpm@11.18.0",
+	"engines": {
+		"node": ">=22.13"
+	},
 	"scripts": {
 		"deploy": "wrangler deploy",
 		"dev": "wrangler dev",
@@ -15,7 +18,7 @@
 		"format": "prettier --write .",
 		"format:check": "prettier --check .",
 		"build": "wrangler deploy --dry-run",
-		"validate": "pnpm run lint && pnpm run format:check && pnpm run type-check && pnpm run build"
+		"validate": "pnpm run type-check && pnpm run lint && pnpm run format:check && pnpm run build"
 	},
 	"dependencies": {
 		"@cloudflare/workers-oauth-provider": "^0.8.3",

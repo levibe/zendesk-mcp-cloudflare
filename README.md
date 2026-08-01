@@ -68,13 +68,13 @@ Create a separate OAuth App for development:
 Set production secrets via Wrangler:
 
 ```bash
-pnpm wrangler secret put GOOGLE_CLIENT_ID
-pnpm wrangler secret put GOOGLE_CLIENT_SECRET
-pnpm wrangler secret put COOKIE_ENCRYPTION_KEY # Random string, e.g. openssl rand -hex 32
-pnpm wrangler secret put ZENDESK_SUBDOMAIN
-pnpm wrangler secret put ZENDESK_EMAIL
-pnpm wrangler secret put ZENDESK_API_TOKEN
-pnpm wrangler secret put HOSTED_DOMAIN # Optional: restrict to specific Google domain
+pnpm exec wrangler secret put GOOGLE_CLIENT_ID
+pnpm exec wrangler secret put GOOGLE_CLIENT_SECRET
+pnpm exec wrangler secret put COOKIE_ENCRYPTION_KEY # Random string, e.g. openssl rand -hex 32
+pnpm exec wrangler secret put ZENDESK_SUBDOMAIN
+pnpm exec wrangler secret put ZENDESK_EMAIL
+pnpm exec wrangler secret put ZENDESK_API_TOKEN
+pnpm exec wrangler secret put HOSTED_DOMAIN # Optional: restrict to specific Google domain
 ```
 
 For local development, create `.dev.vars`:
@@ -90,7 +90,7 @@ ZENDESK_API_TOKEN=your_api_token
 ### 4. KV Namespace Setup
 
 ```bash
-pnpm wrangler kv namespace create "OAUTH_KV"
+pnpm exec wrangler kv namespace create "OAUTH_KV"
 # Update wrangler.jsonc with the returned KV ID
 ```
 
@@ -113,8 +113,10 @@ pnpm run dev
 #### Test with MCP Inspector
 
 ```bash
-pnpm dlx @modelcontextprotocol/inspector@latest
+pnpm dlx @modelcontextprotocol/inspector
 ```
+
+The cooldown in `pnpm-workspace.yaml` applies here too, so this resolves to the newest inspector released more than a week ago rather than the absolute newest.
 
 - For production: Enter `https://zendesk-mcp.<your-subdomain>.workers.dev/sse`
 - For local: Enter `http://localhost:8788/sse`
@@ -123,7 +125,7 @@ Complete the authentication flow and you'll see all Zendesk tools available.
 
 ## Claude Desktop Integration
 
-Add to your Claude Desktop configuration file:
+Add to your Claude Desktop configuration file. Leave the command below as `npx`, not `pnpm dlx`: it runs on your own machine when Claude Desktop starts the server, where Node ships `npx` but pnpm may not be installed at all.
 
 ```json
 {
