@@ -69,11 +69,83 @@ export const nameSchema = z.string().describe('Name')
 export const emailSchema = z.string().describe('Email address')
 export const descriptionSchema = z.string().optional().describe('Description')
 
-// Macro action schema
+/**
+ * A single thing a macro does when an agent applies it.
+ *
+ * Zendesk writes an action's value one of three ways, and the union is exactly those three.
+ * Almost always a string, including for numeric ids — `{ field: 'group_id', value: '12345' }`.
+ * An array of strings for the actions carrying more than one part, where `comment_value` can
+ * lead with a channel and a notification is a recipient, a subject and a body. And a bare
+ * boolean for `comment_mode_is_public`, the one action documented as taking `true` or
+ * `false` rather than a string, which is how a macro decides whether its reply is public.
+ *
+ * A number is left out deliberately, since no documented action takes one, and it is the
+ * shape a caller reaches for when it should have sent an id as a string.
+ *
+ * `z.any()` was survivable here while no client could reach a macro write. This is now the
+ * validation boundary between a model-generated payload and a live Zendesk instance, and
+ * `z.any()` validates nothing. It also made `value` optional in the inferred type, since
+ * `any` admits `undefined` — an action with no value is not something Zendesk can carry
+ * out, so it is required rather than optional by accident.
+ */
 export const macroActionSchema = z.object({
-	field: z.string().describe('Field to modify'),
-	value: z.any().describe('Value to set'),
+	field: z
+		.string()
+		.min(1)
+		.describe('Field the action changes, e.g. status, priority, comment_value'),
+	value: z
+		.union([z.string(), z.boolean(), z.array(z.string())])
+		.describe(
+			'Value to set: usually a string, an array of strings for actions taking several parts, or a boolean for comment_mode_is_public'
+		),
 })
+
+/**
+ * The fields a macro write may set, declared once for every layer that needs them.
+ *
+ * `create_macro` registers this shape as its schema, `update_macro` registers the same
+ * fields with nothing required, and the client's payload types are inferred from both. So
+ * the arguments MCP validates and the payload the client accepts cannot describe different
+ * things, and neither is written a second time against Zendesk's documentation. This is the
+ * schema-derived option #12 weighs, getting its first real test on macros.
+ *
+ * `id` is deliberately absent. It addresses the macro in the URL rather than travelling in
+ * the body, so `update_macro` adds it to its own schema and the payload type stays exactly
+ * the set of fields that can be written.
+ */
+export const createMacroSchema = {
+	title: z.string().min(1).describe('Macro title'),
+	description: descriptionSchema.describe('Macro description'),
+	actions: z
+		.array(macroActionSchema)
+		.min(1)
+		.describe('Actions to perform when the macro is applied'),
+	active: z.boolean().optional().describe('Whether agents can see and apply the macro'),
+}
+
+/**
+ * The same fields with nothing required, because Zendesk updates what it is given and leaves
+ * the rest of the macro alone. Deriving this with `.partial()` rather than restating the
+ * fields means a field added above cannot be forgotten here.
+ *
+ * `actions` is the exception, and it is the one field whose meaning genuinely differs at
+ * update time. Zendesk's own documentation: "Updating an action updates the containing array,
+ * clearing the other actions. Include all your actions when updating any action." Inheriting
+ * create's wording would leave it reading as the actions to add, and a caller acting on that
+ * would silently strip every action the macro already had. Only the sentence is replaced —
+ * the array and its `min(1)` still come from the shape above.
+ */
+export const updateMacroSchema = {
+	...z.object(createMacroSchema).partial().shape,
+	actions: createMacroSchema.actions
+		.describe(
+			"The macro's complete action list, which replaces the existing one. Zendesk drops any action left out, so read the macro with get_macro first and send all of its actions rather than only the new ones"
+		)
+		.optional(),
+}
+
+export type MacroCreatePayload = InferParams<typeof createMacroSchema>
+export type MacroUpdatePayload = InferParams<typeof updateMacroSchema>
 
 // Search Response Types
 export interface SearchResponseMetadata {

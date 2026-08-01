@@ -4,6 +4,8 @@
  * Provides methods for all major Zendesk API endpoints across Support, Talk, Chat, and Guide
  */
 
+import type { MacroCreatePayload, MacroUpdatePayload } from './types/zendesk'
+
 interface ZendeskClientConfig {
 	subdomain?: string
 	email?: string
@@ -422,11 +424,16 @@ export class ZendeskClient {
 		return this.request('GET', `/macros/${id}.json`)
 	}
 
-	async createMacro(data: any) {
+	/**
+	 * The two typed payloads on this client. Their types come from the macro tools' own Zod
+	 * schemas, so what a caller may send is whatever MCP already validated. The other sixteen
+	 * create and update payloads are still `any` and are #12's to settle.
+	 */
+	async createMacro(data: MacroCreatePayload) {
 		return this.request('POST', '/macros.json', { macro: data })
 	}
 
-	async updateMacro(id: number, data: any) {
+	async updateMacro(id: number, data: MacroUpdatePayload) {
 		this.validateId(id)
 		return this.request('PUT', `/macros/${id}.json`, { macro: data })
 	}

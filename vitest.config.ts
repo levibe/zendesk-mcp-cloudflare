@@ -1,5 +1,7 @@
 import { defineConfig } from 'vitest/config'
 
+import { coverageThresholds } from './vitest.thresholds'
+
 export default defineConfig({
 	test: {
 		// Tests sit next to the code they cover, so `pnpm run lint` and `tsc --noEmit`
@@ -14,12 +16,15 @@ export default defineConfig({
 		unstubGlobals: true,
 		coverage: {
 			provider: 'v8',
-			// text and html are for reading locally. The text table is a summary, not the
-			// whole picture: it omits files that are at 100% on all four metrics, so a
-			// directory can print a middling percentage with its finished files nowhere in
-			// the listing. `coverage.skipFull` does not switch that off — it reads the same
-			// either way in 4.1.10. The html report has every file, so open that before
-			// concluding something is uncovered.
+			// text and html are for reading locally. Run through a coding agent, the text
+			// table is a summary rather than the whole picture: Vitest turns `skipFull` on
+			// for the text reporter whenever std-env reports an agent, so files at 100% on
+			// all four metrics drop out and a directory can print a middling percentage
+			// with its finished files nowhere in the listing. Setting `coverage.skipFull`
+			// back to false does not undo it, because the override is applied to the
+			// reporter's own options, which win. From a plain terminal, and on CI, none of
+			// that applies and every file is listed. The html report always has all of
+			// them, so open that before concluding something is uncovered.
 			//
 			// The two json reporters exist for CI rather than for people. The reporting
 			// action requires json-summary for the totals, and reads json for the per-file
@@ -36,6 +41,17 @@ export default defineConfig({
 			// tools and the vendored OAuth code have to be in the denominator.
 			include: ['src/**/*.ts'],
 			exclude: ['src/**/*.test.ts'],
+			// Per file rather than one figure over all of src/. The overall number is
+			// diluted on purpose by the include above, so a floor under it would mostly
+			// reward covering passthrough tools — and would let a real branch test be
+			// deleted from the client so long as one more thin module got covered. There
+			// is no global threshold here, only the per-file ones.
+			//
+			// They are imported rather than written inline because the reporting action
+			// on CI reads this file with a regex per metric and treats the first hit as a
+			// target for the whole project. See vitest.thresholds.ts, which explains what
+			// that did to the comment and why the numbers have to stay over there.
+			thresholds: coverageThresholds,
 		},
 	},
 })
