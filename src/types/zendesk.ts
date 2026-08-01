@@ -81,7 +81,7 @@ export interface SearchResponseMetadata {
 export interface StandardizedSearchResult {
 	result_type: string
 	id?: number
-	[key: string]: any
+	[key: string]: unknown
 }
 
 export interface StandardizedSearchResponse {

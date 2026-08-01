@@ -94,8 +94,8 @@ export class ZendeskClient {
 		method: string,
 		endpoint: string,
 		data?: any,
-		params?: Record<string, any>
-	): Promise<any> {
+		params?: Record<string, unknown>
+	): Promise<unknown> {
 		try {
 			// Validate credentials before making requests
 			if (!this.subdomain || !this.email || !this.apiToken) {
@@ -200,9 +200,9 @@ export class ZendeskClient {
 		method: string,
 		endpoint: string,
 		data?: any,
-		params?: Record<string, any>,
+		params?: Record<string, unknown>,
 		maxRetries = 3
-	): Promise<any> {
+	): Promise<unknown> {
 		let lastError: Error | undefined
 
 		for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -237,7 +237,7 @@ export class ZendeskClient {
 	}
 
 	// === TICKETS API ===
-	async listTickets(params?: Record<string, any>) {
+	async listTickets(params?: Record<string, unknown>) {
 		return this.request('GET', '/tickets.json', null, params)
 	}
 
@@ -261,7 +261,7 @@ export class ZendeskClient {
 	}
 
 	// === USERS API ===
-	async listUsers(params?: Record<string, any>) {
+	async listUsers(params?: Record<string, unknown>) {
 		return this.request('GET', '/users.json', null, params)
 	}
 
@@ -285,7 +285,7 @@ export class ZendeskClient {
 	}
 
 	// === ORGANIZATIONS API ===
-	async listOrganizations(params?: Record<string, any>) {
+	async listOrganizations(params?: Record<string, unknown>) {
 		return this.request('GET', '/organizations.json', null, params)
 	}
 
@@ -309,7 +309,7 @@ export class ZendeskClient {
 	}
 
 	// === GROUPS API ===
-	async listGroups(params?: Record<string, any>) {
+	async listGroups(params?: Record<string, unknown>) {
 		return this.request('GET', '/groups.json', null, params)
 	}
 
@@ -333,7 +333,7 @@ export class ZendeskClient {
 	}
 
 	// === MACROS API ===
-	async listMacros(params?: Record<string, any>) {
+	async listMacros(params?: Record<string, unknown>) {
 		return this.request('GET', '/macros.json', null, params)
 	}
 
@@ -357,7 +357,7 @@ export class ZendeskClient {
 	}
 
 	// === VIEWS API ===
-	async listViews(params?: Record<string, any>) {
+	async listViews(params?: Record<string, unknown>) {
 		return this.request('GET', '/views.json', null, params)
 	}
 
@@ -381,7 +381,7 @@ export class ZendeskClient {
 	}
 
 	// === TRIGGERS API ===
-	async listTriggers(params?: Record<string, any>) {
+	async listTriggers(params?: Record<string, unknown>) {
 		return this.request('GET', '/triggers.json', null, params)
 	}
 
@@ -405,7 +405,7 @@ export class ZendeskClient {
 	}
 
 	// === AUTOMATIONS API ===
-	async listAutomations(params?: Record<string, any>) {
+	async listAutomations(params?: Record<string, unknown>) {
 		return this.request('GET', '/automations.json', null, params)
 	}
 
@@ -429,12 +429,12 @@ export class ZendeskClient {
 	}
 
 	// === SEARCH API ===
-	async search(query: string, params: Record<string, any> = {}) {
+	async search(query: string, params: Record<string, unknown> = {}) {
 		return this.requestWithRetry('GET', '/search.json', null, { query, ...params })
 	}
 
 	// === HELP CENTER API ===
-	async listArticles(params?: Record<string, any>) {
+	async listArticles(params?: Record<string, unknown>) {
 		return this.request('GET', '/help_center/articles.json', null, params)
 	}
 
@@ -460,12 +460,12 @@ export class ZendeskClient {
 		return this.request('DELETE', `/help_center/articles/${id}.json`)
 	}
 
-	async searchArticles(params?: Record<string, any>) {
+	async searchArticles(params?: Record<string, unknown>) {
 		return this.requestWithRetry('GET', '/help_center/articles/search.json', null, params)
 	}
 
 	// Categories
-	async listCategories(params?: Record<string, any>) {
+	async listCategories(params?: Record<string, unknown>) {
 		return this.request('GET', '/help_center/categories.json', null, params)
 	}
 
@@ -493,7 +493,7 @@ export class ZendeskClient {
 	*/
 
 	// Sections
-	async listSections(params?: Record<string, any>) {
+	async listSections(params?: Record<string, unknown>) {
 		return this.request('GET', '/help_center/sections.json', null, params)
 	}
 
@@ -520,12 +520,12 @@ export class ZendeskClient {
 	}
 	*/
 
-	async listSectionsByCategory(categoryId: number, params?: Record<string, any>) {
+	async listSectionsByCategory(categoryId: number, params?: Record<string, unknown>) {
 		this.validateId(categoryId)
 		return this.request('GET', `/help_center/categories/${categoryId}/sections.json`, null, params)
 	}
 
-	async listArticlesBySection(sectionId: number, params?: Record<string, any>) {
+	async listArticlesBySection(sectionId: number, params?: Record<string, unknown>) {
 		this.validateId(sectionId)
 		return this.request('GET', `/help_center/sections/${sectionId}/articles.json`, null, params)
 	}
@@ -536,7 +536,7 @@ export class ZendeskClient {
 	}
 
 	// === CHAT API ===
-	async listChats(params?: Record<string, any>) {
+	async listChats(params?: Record<string, unknown>) {
 		return this.request('GET', '/chats.json', null, params)
 	}
 }

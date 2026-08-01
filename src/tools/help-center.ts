@@ -8,6 +8,36 @@ import type { ToolDefinition } from '../types/zendesk'
 import { paginationSchema, sortingSchema, idSchema } from '../types/zendesk'
 import { createTool } from '../utils/tool-registry'
 import { executeSearchWithStandardizedResponse } from '../utils/search-response'
+import { isRecord } from '../utils/narrow'
+
+/**
+ * A category, section or article as `get_help_center_hierarchy` uses it. That tool is the
+ * only one here that reads into a response body rather than handing it straight to
+ * JSON.stringify, so it is the only one that has to say what it expects back. All it needs
+ * is the `id` to fetch the level below; everything else rides along to the caller untouched.
+ */
+interface HelpCenterEntity {
+	id: number
+	[key: string]: unknown
+}
+
+const isHelpCenterEntity = (value: unknown): value is HelpCenterEntity =>
+	isRecord(value) && typeof value.id === 'number'
+
+/**
+ * Reads the entities stored under `key` out of a response body. Both shapes Zendesk uses are
+ * accepted, because `getCategory` answers with a single `{ category: {...} }` where
+ * `listCategories` answers with `{ categories: [...] }`. Entries without a numeric `id` are
+ * dropped, since the hierarchy cannot fetch their children anyway — that keeps the `|| []`
+ * this file relied on before the client started returning `unknown`.
+ */
+const readEntities = (response: unknown, key: string): HelpCenterEntity[] => {
+	if (!isRecord(response)) return []
+
+	const value = response[key]
+	if (Array.isArray(value)) return value.filter(isHelpCenterEntity)
+	return isHelpCenterEntity(value) ? [value] : []
+}
 
 export const helpCenterTools: ToolDefinition[] = [
 	createTool(
@@ -215,23 +245,24 @@ export const helpCenterTools: ToolDefinition[] = [
 					? await client.getCategory(params.category_id)
 					: await client.listCategories()
 
-				const categories = params.category_id
-					? [categoriesResponse.category]
-					: categoriesResponse.categories || []
+				const categories = readEntities(
+					categoriesResponse,
+					params.category_id ? 'category' : 'categories'
+				)
 
 				const hierarchy = await Promise.all(
-					categories.map(async (category: any) => {
+					categories.map(async (category) => {
 						// Get sections for this category
 						const sectionsResponse = await client.listSectionsByCategory(category.id)
-						const sections = sectionsResponse.sections || []
+						const sections = readEntities(sectionsResponse, 'sections')
 
 						const sectionsWithArticles = params.include_articles
 							? await Promise.all(
-									sections.map(async (section: any) => {
+									sections.map(async (section) => {
 										const articlesResponse = await client.listArticlesBySection(section.id)
 										return {
 											...section,
-											articles: articlesResponse.articles || [],
+											articles: readEntities(articlesResponse, 'articles'),
 										}
 									})
 								)
@@ -253,7 +284,7 @@ export const helpCenterTools: ToolDefinition[] = [
 							(sum, cat) =>
 								sum +
 								cat.sections.reduce(
-									(secSum: number, sec: any) => secSum + (sec.articles?.length || 0),
+									(secSum, sec) => secSum + (Array.isArray(sec.articles) ? sec.articles.length : 0),
 									0
 								),
 							0
