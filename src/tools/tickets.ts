@@ -15,7 +15,7 @@ import {
 	tagsSchema
 } from '../types/zendesk'
 import { createTool } from '../utils/tool-registry'
-import { withCreateHandling } from '../utils/error-handling'
+import { withCreateHandling, withUpdateHandling, withDeleteHandling } from '../utils/error-handling'
 import { executeSearchWithStandardizedResponse } from '../utils/search-response'
 
 // Ticket management tools
@@ -124,10 +124,10 @@ export const ticketsTools: ToolDefinition[] = [
 			per_page?: number;
 		}) => {
 			const { query } = params
-			
+
 			// Build the search query with filters
 			let searchQuery = `type:ticket ${query}`
-			
+
 			if (params.status) searchQuery += ` status:${params.status}`
 			if (params.priority) searchQuery += ` priority:${params.priority}`
 			if (params.type) searchQuery += ` ticket_type:${params.type}`
@@ -136,7 +136,7 @@ export const ticketsTools: ToolDefinition[] = [
 			if (params.group_id) searchQuery += ` group:${params.group_id}`
 			if (params.created_after) searchQuery += ` created>${params.created_after}`
 			if (params.created_before) searchQuery += ` created<${params.created_before}`
-			
+
 			return executeSearchWithStandardizedResponse(
 				() => client.search(searchQuery, {
 					sort_by: params.sort_by,
@@ -149,7 +149,6 @@ export const ticketsTools: ToolDefinition[] = [
 		}
 	),
 
-	/* DISABLED FOR SECURITY - update_ticket tool
 	createTool(
 		'update_ticket',
 		'Update an existing ticket',
@@ -192,9 +191,7 @@ export const ticketsTools: ToolDefinition[] = [
 			)()
 		}
 	),
-	*/
 
-	/* DISABLED FOR SECURITY - delete_ticket tool
 	createTool(
 		'delete_ticket',
 		'Delete a ticket',
@@ -209,5 +206,4 @@ export const ticketsTools: ToolDefinition[] = [
 			)()
 		}
 	)
-	*/
 ]

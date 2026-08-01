@@ -10,12 +10,19 @@ interface ZendeskClientConfig {
 	apiToken?: string;
 }
 
+/**
+ * The slice of the Worker environment this client reads. Naming it keeps a typo like
+ * ZENDESK_SUBDOMIAN a compile error rather than an empty string that only surfaces as a
+ * failed API call, and lets tests pass credentials without a whole Env.
+ */
+type ZendeskEnv = Pick<Env, 'ZENDESK_SUBDOMAIN' | 'ZENDESK_EMAIL' | 'ZENDESK_API_TOKEN'>
+
 export class ZendeskClient {
 	private subdomain: string
 	private email: string
 	private apiToken: string
 
-	constructor (config?: ZendeskClientConfig, env?: any) {
+	constructor (config?: ZendeskClientConfig, env?: ZendeskEnv) {
 		// Load Zendesk credentials from config, environment, or Cloudflare Workers env
 		this.subdomain = config?.subdomain || env?.ZENDESK_SUBDOMAIN || ''
 		this.email = config?.email || env?.ZENDESK_EMAIL || ''
