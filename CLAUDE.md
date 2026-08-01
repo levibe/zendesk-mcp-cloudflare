@@ -124,7 +124,7 @@ The MCP server currently provides these Zendesk tools:
 Vitest, with no runtime of its own. Everything under test is either pure or reachable through a stubbed `fetch`, so nothing here needs `workerd` or the network. If something eventually does, `@cloudflare/vitest-pool-workers` runs the same suite inside the real runtime — but reach for it when a test actually requires it, not before.
 
 ```bash
-pnpm run test            # Run the suite once (what validate and CI use)
+pnpm run test            # Run the suite once (what validate uses)
 pnpm run test:watch      # Re-run on change while working
 pnpm run test:coverage   # Run once and report coverage (text plus coverage/index.html)
 ```
@@ -133,7 +133,11 @@ Coverage measures all of `src/`, not only the files a test imported, so a module
 
 Read `coverage/index.html` rather than the terminal table when you want the full picture. The text reporter omits files that are at 100% on all four metrics, and `coverage.skipFull` does not change that, so a directory can print a middling percentage with its finished files nowhere in sight.
 
-Nothing gates on a coverage threshold. The number is a map of what is untested, not a target to move — `validate` and CI run `test`, not `test:coverage`.
+CI runs `test:coverage` and posts the result as a comment on the pull request, so the report is something a reviewer reads rather than something someone has to go and generate. `validate` stays on the bare `test`, which keeps the local loop to the question you usually have — did anything break.
+
+That comment is a map of what is untested, and nothing gates on the overall number. A single figure over all of `src/` is diluted by design here, since the untested tools and the vendored OAuth code are deliberately in the denominator, so a floor under it would mostly reward covering passthrough code. Per-file thresholds on the modules that branch are the useful form of that idea, and are being worked out in #26.
+
+The `json-summary` and `json` reporters exist for that comment rather than for people; `text` and `html` are the ones to read locally. `reportOnFailure` is on so a failing run still explains itself.
 
 Tests sit next to the code they cover as `*.test.ts`, which is why `pnpm run lint` and `tsc --noEmit` already reach them without a second path to configure. `wrangler deploy --dry-run` bundles from `src/index.ts` and follows imports, so nothing imports a test file and none of this ships.
 

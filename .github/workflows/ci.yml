@@ -18,6 +18,11 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Overrides the workflow-wide block above for this job, so contents: read has
+    # to be restated. The write is what lets the coverage step leave its comment.
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       # persist-credentials: false keeps the checkout token out of .git/config.
       # Nothing here pushes, and the install step below runs dependency build
@@ -46,9 +51,10 @@ jobs:
       # lockfile entry, on a machine with no warm verification cache.
       - run: pnpm install --frozen-lockfile
 
-      # These five are what `pnpm run validate` chains together, in the same
-      # order. Split apart so the checks UI names the one that failed; validate
-      # stays as the single command to run locally.
+      # These five are the checks `pnpm run validate` chains together, in the
+      # same order. Split apart so the checks UI names the one that failed;
+      # validate stays as the single command to run locally. Only Test differs,
+      # and the comment there says why.
       - name: Type check
         run: pnpm run type-check
 
@@ -58,8 +64,30 @@ jobs:
       - name: Format check
         run: pnpm run format:check
 
+      # test:coverage rather than test, so the one run that happens here also
+      # produces the json the reporting step below reads. validate stays on the
+      # bare test locally, where coverage is something you ask for deliberately.
       - name: Test
-        run: pnpm run test
+        run: pnpm run test:coverage
 
       - name: Build
         run: pnpm run build
+
+      # Renders the coverage json as a job summary and as a single pull request
+      # comment that gets rewritten in place on each push.
+      #
+      # Pinned to the commit behind v2.12.2 rather than to the tag, because a tag
+      # can be moved to point at something else. This is the only third-party
+      # action here — the rest are actions/* and pnpm/* — and it is the one that
+      # runs with a token that can write to pull requests.
+      #
+      # Runs even when an earlier step failed, since a red run is when the report
+      # is worth reading. !cancelled() rather than always() so that cancelling a
+      # superseded run does not leave a comment behind.
+      - name: Report coverage
+        if: ${{ !cancelled() }}
+        # A pull_request run from a fork gets a read-only token whatever the
+        # permissions block says, so commenting fails there. The job summary is
+        # still written, and CI should not go red over a missing comment.
+        continue-on-error: true
+        uses: davelosert/vitest-coverage-report-action@8b157684c6a6b259b97d45e72b44242865c0f6a5 # v2.12.2
