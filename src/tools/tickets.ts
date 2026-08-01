@@ -192,7 +192,7 @@ export const ticketsTools: ToolDefinition[] = [
 				tags?: string[]
 			}
 		) => {
-			const ticketData: any = {}
+			const ticketData: Record<string, unknown> = {}
 
 			if (params.subject !== undefined) ticketData.subject = params.subject
 			if (params.comment !== undefined) ticketData.comment = { body: params.comment }

@@ -48,11 +48,13 @@ pnpm run lint:fix        # Lint and auto-fix
 pnpm run validate        # type-check, lint, format:check, test and build together
 ```
 
-`no-explicit-any` is set to warn rather than error, so `pnpm run lint` currently reports 37 warnings and still exits clean.
+`no-explicit-any` is set to warn rather than error, so `pnpm run lint` currently reports 27 warnings and still exits clean.
 
 The Zendesk client no longer contributes to that count on the read side. `request` and `requestWithRetry` return `Promise<unknown>`, and every list method takes `Record<string, unknown>` for its query parameters, so a caller that wants to reach into a response body has to narrow it first. Two places do: `src/tools/help-center.ts`, which walks the category and section hierarchy, and `src/utils/search-response.ts`, which reshapes search bodies. Both start from `isRecord` in `src/utils/narrow.ts`, which proves a value is a non-null object and nothing more, leaving every property still `unknown` and still to be checked. Everything else hands the response straight to `JSON.stringify`.
 
-What is left is deliberate rather than overlooked. Twenty of the warnings are the `data` argument on the client's create and update methods, which stays `any` until somebody decides whether hand-maintained Zendesk request payloads are worth the drift (see #8). Five more are in `src/workers-oauth-utils.ts`, which is vendored and is being reworked in #3 and #4.
+What is left is deliberate rather than overlooked, and each group has an issue behind it. Eighteen of the warnings are the `data` argument on the client's create and update methods, which stays `any` until somebody decides whether hand-maintained Zendesk request payloads are worth the drift (see #12). Four sit in `src/types/zendesk.ts` and `src/utils/tool-registry.ts`, where `createTool` accepts a handler with concrete parameter types and then stores it in a `ToolDefinition` that has forgotten them; deriving those types from each tool's Zod schema is #13. The last five are in `src/workers-oauth-utils.ts`, which is vendored and is being reworked in #3 and #4.
+
+Note that `unknown` is not a free substitute in every position. It works for a value the code only passes along — a query parameter that gets stringified, a request body handed to `JSON.stringify` — because the constraint lands on the function body. It buys nothing in a **parameter** position where the body just forwards the value, since `unknown` accepts exactly what `any` accepts from a caller. That is why the create and update payloads above are still open rather than quietly swapped.
 
 ### Deployment
 
