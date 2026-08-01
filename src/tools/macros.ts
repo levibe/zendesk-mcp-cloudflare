@@ -34,14 +34,17 @@ export const macrosTools: ToolDefinition[] = [
 		{
 			title: z.string().describe('Macro title'),
 			description: descriptionSchema.describe('Macro description'),
-			actions: z.array(macroActionSchema).describe('Actions to perform when macro is applied')
+			actions: z.array(macroActionSchema).describe('Actions to perform when macro is applied'),
 		},
-		async (client: ZendeskClient, params: {
-      title: string;
-      description?: string;
-      actions: Array<{ field: string; value: any }>;
-    }) => {
+		async (
+			client: ZendeskClient,
+			params: {
+				title: string
+				description?: string
+				actions: Array<{ field: string; value: any }>
+			}
+		) => {
 			return withCreateHandling(() => client.createMacro(params), 'Macro')()
 		}
-	)
+	),
 ]

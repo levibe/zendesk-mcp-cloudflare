@@ -24,5 +24,5 @@ export const automationsTools: ToolDefinition[] = [
 		async (client: ZendeskClient, { id }: { id: number }) => {
 			return client.getAutomation(id)
 		}
-	)
+	),
 ]

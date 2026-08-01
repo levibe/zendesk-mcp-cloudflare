@@ -27,6 +27,7 @@ This is a remote Model Context Protocol (MCP) server that integrates Zendesk API
 This project uses pnpm, pinned via the `packageManager` field in `package.json`. Use `pnpm run <script>` rather than the bare `pnpm <script>` shorthand, because some script names (`deploy` among them) collide with pnpm's own built-in commands.
 
 ### Local Development
+
 ```bash
 pnpm install             # Install dependencies
 pnpm run dev             # Start local development server (localhost:8788)
@@ -34,6 +35,7 @@ pnpm run type-check      # Run TypeScript type checking
 ```
 
 ### Deployment
+
 ```bash
 pnpm run deploy      # Deploy to Cloudflare Workers
 ```
@@ -41,7 +43,9 @@ pnpm run deploy      # Deploy to Cloudflare Workers
 ### Environment Setup
 
 #### Required Secrets (for production)
+
 Set these via `wrangler secret put <SECRET_NAME>`:
+
 - `GOOGLE_CLIENT_ID` - Google OAuth client ID
 - `GOOGLE_CLIENT_SECRET` - Google OAuth client secret
 - `COOKIE_ENCRYPTION_KEY` - Random string for cookie encryption
@@ -51,7 +55,9 @@ Set these via `wrangler secret put <SECRET_NAME>`:
 - `HOSTED_DOMAIN` - (Optional) Restrict to specific Google domain
 
 #### Local Development Setup
+
 Create `.dev.vars` file:
+
 ```
 GOOGLE_CLIENT_ID=your_dev_client_id
 GOOGLE_CLIENT_SECRET=your_dev_client_secret
@@ -61,6 +67,7 @@ ZENDESK_API_TOKEN=your_token
 ```
 
 #### KV Namespace Setup
+
 ```bash
 pnpm wrangler kv namespace create "OAUTH_KV"
 # Update wrangler.jsonc with the returned KV ID
@@ -71,6 +78,7 @@ pnpm wrangler kv namespace create "OAUTH_KV"
 The MCP server currently provides these Zendesk tools:
 
 ### Ticket Management
+
 - `list_tickets` - List tickets with pagination and filtering
 - `get_ticket` - Get specific ticket by ID
 - `create_ticket` - Create new support tickets
@@ -78,34 +86,36 @@ The MCP server currently provides these Zendesk tools:
 - `delete_ticket` - Delete tickets
 
 ### User Management
+
 - `list_users` - List users with pagination and role filtering
 - `get_user` - Get specific user by ID
 - `create_user` - Create new users
 
 ### Search
+
 - `search` - Search across all Zendesk data
 
 ## Testing
 
 ### Local Testing with MCP Inspector
+
 ```bash
 pnpm dlx @modelcontextprotocol/inspector@latest
 # Connect to: http://localhost:8788/sse
 ```
 
 ### Claude Desktop Integration
+
 Add to Claude Desktop config:
+
 ```json
 {
-  "mcpServers": {
-    "zendesk": {
-      "command": "npx",
-      "args": [
-        "mcp-remote",
-        "https://zendesk-mcp-server.<your-subdomain>.workers.dev/sse"
-      ]
-    }
-  }
+	"mcpServers": {
+		"zendesk": {
+			"command": "npx",
+			"args": ["mcp-remote", "https://zendesk-mcp-server.<your-subdomain>.workers.dev/sse"]
+		}
+	}
 }
 ```
 

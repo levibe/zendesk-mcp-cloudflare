@@ -1,38 +1,38 @@
 {
-  "name": "zendesk-mcp",
-  "version": "0.1.0",
-  "type": "module",
-  "private": true,
-  "packageManager": "pnpm@11.18.0",
-  "scripts": {
-    "deploy": "wrangler deploy",
-    "dev": "wrangler dev",
-    "start": "wrangler dev",
-    "cf-typegen": "wrangler types",
-    "type-check": "tsc --noEmit",
-    "lint": "eslint src/",
-    "lint:fix": "eslint src/ --fix",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
-    "build": "wrangler deploy --dry-run",
-    "validate": "pnpm run lint && pnpm run format:check && pnpm run type-check && pnpm run build"
-  },
-  "dependencies": {
-    "@cloudflare/workers-oauth-provider": "^0.8.3",
-    "@modelcontextprotocol/sdk": "1.13.1",
-    "agents": "^0.0.100",
-    "hono": "^4.8.3",
-    "just-pick": "^4.2.0",
-    "workers-mcp": "^0.0.13",
-    "zod": "^3.25.67"
-  },
-  "devDependencies": {
-    "@eslint/js": "^9.31.0",
-    "eslint": "^9.31.0",
-    "eslint-config-prettier": "^10.1.8",
-    "prettier": "^3.6.2",
-    "typescript": "^5.8.3",
-    "typescript-eslint": "^8.65.0",
-    "wrangler": "^4.22.0"
-  }
+	"name": "zendesk-mcp",
+	"version": "0.1.0",
+	"type": "module",
+	"private": true,
+	"packageManager": "pnpm@11.18.0",
+	"scripts": {
+		"deploy": "wrangler deploy",
+		"dev": "wrangler dev",
+		"start": "wrangler dev",
+		"cf-typegen": "wrangler types",
+		"type-check": "tsc --noEmit",
+		"lint": "eslint src/",
+		"lint:fix": "eslint src/ --fix",
+		"format": "prettier --write .",
+		"format:check": "prettier --check .",
+		"build": "wrangler deploy --dry-run",
+		"validate": "pnpm run lint && pnpm run format:check && pnpm run type-check && pnpm run build"
+	},
+	"dependencies": {
+		"@cloudflare/workers-oauth-provider": "^0.8.3",
+		"@modelcontextprotocol/sdk": "1.13.1",
+		"agents": "^0.0.100",
+		"hono": "^4.8.3",
+		"just-pick": "^4.2.0",
+		"workers-mcp": "^0.0.13",
+		"zod": "^3.25.67"
+	},
+	"devDependencies": {
+		"@eslint/js": "^9.31.0",
+		"eslint": "^9.31.0",
+		"eslint-config-prettier": "^10.1.8",
+		"prettier": "^3.6.2",
+		"typescript": "^5.8.3",
+		"typescript-eslint": "^8.65.0",
+		"wrangler": "^4.22.0"
+	}
 }

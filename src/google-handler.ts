@@ -21,7 +21,10 @@ app.get('/authorize', async (c) => {
 	try {
 		oauthReqInfo = await c.env.OAUTH_PROVIDER.parseAuthRequest(c.req.raw)
 	} catch (error) {
-		console.warn('parseAuthRequest rejected the request:', error instanceof Error ? error.message : String(error))
+		console.warn(
+			'parseAuthRequest rejected the request:',
+			error instanceof Error ? error.message : String(error)
+		)
 		return c.text('Invalid authorization request', 400)
 	}
 
@@ -55,10 +58,10 @@ app.post('/authorize', async (c) => {
 	return redirectToGoogle(c, state.oauthReqInfo, headers)
 })
 
-async function redirectToGoogle (
+async function redirectToGoogle(
 	c: Context,
 	oauthReqInfo: AuthRequest,
-	headers: Record<string, string> = {},
+	headers: Record<string, string> = {}
 ) {
 	return new Response(null, {
 		headers: {
@@ -120,9 +123,9 @@ app.get('/callback', async (c) => {
 	}
 
 	const { id, name, email } = (await userResponse.json()) as {
-		id: string;
-		name: string;
-		email: string;
+		id: string
+		name: string
+		email: string
 	}
 
 	// Enforce domain restriction if HOSTED_DOMAIN is set

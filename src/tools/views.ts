@@ -24,5 +24,5 @@ export const viewsTools: ToolDefinition[] = [
 		async (client: ZendeskClient, { id }: { id: number }) => {
 			return client.getView(id)
 		}
-	)
+	),
 ]

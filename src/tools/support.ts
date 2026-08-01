@@ -13,5 +13,5 @@ export const supportTools: ToolDefinition[] = [
 		async () => {
 			return 'Zendesk Support information: This MCP server provides comprehensive access to Zendesk Support APIs including tickets, users, organizations, groups, macros, views, triggers, and automations.'
 		}
-	)
+	),
 ]

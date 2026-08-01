@@ -10,7 +10,7 @@
  *
  * @returns {string} The authorization URL.
  */
-export function getUpstreamAuthorizeUrl ({
+export function getUpstreamAuthorizeUrl({
 	upstreamUrl,
 	clientId,
 	scope,
@@ -18,12 +18,12 @@ export function getUpstreamAuthorizeUrl ({
 	state,
 	hostedDomain,
 }: {
-	upstreamUrl: string;
-	clientId: string;
-	scope: string;
-	redirectUri: string;
-	state?: string;
-	hostedDomain?: string;
+	upstreamUrl: string
+	clientId: string
+	scope: string
+	redirectUri: string
+	state?: string
+	hostedDomain?: string
 }) {
 	const upstream = new URL(upstreamUrl)
 	upstream.searchParams.set('client_id', clientId)
@@ -48,7 +48,7 @@ export function getUpstreamAuthorizeUrl ({
  *
  * @returns {Promise<[string, null] | [null, Response]>} A promise that resolves to an array containing the access token or an error response.
  */
-export async function fetchUpstreamAuthToken ({
+export async function fetchUpstreamAuthToken({
 	clientId,
 	clientSecret,
 	code,
@@ -56,12 +56,12 @@ export async function fetchUpstreamAuthToken ({
 	upstreamUrl,
 	grantType,
 }: {
-	code: string | undefined;
-	upstreamUrl: string;
-	clientSecret: string;
-	redirectUri: string;
-	clientId: string;
-	grantType: string;
+	code: string | undefined
+	upstreamUrl: string
+	clientSecret: string
+	redirectUri: string
+	clientId: string
+	grantType: string
 }): Promise<[string, null] | [null, Response]> {
 	if (!code) {
 		return [null, new Response('Missing code', { status: 400 })]
@@ -69,11 +69,11 @@ export async function fetchUpstreamAuthToken ({
 
 	const resp = await fetch(upstreamUrl, {
 		body: new URLSearchParams({
-			'client_id': clientId,
-			'client_secret': clientSecret,
-			'code': code,
-			'grant_type': grantType,
-			'redirect_uri': redirectUri,
+			client_id: clientId,
+			client_secret: clientSecret,
+			code: code,
+			grant_type: grantType,
+			redirect_uri: redirectUri,
 		}).toString(),
 		headers: {
 			'Content-Type': 'application/x-www-form-urlencoded',
@@ -86,7 +86,7 @@ export async function fetchUpstreamAuthToken ({
 	}
 
 	interface authTokenResponse {
-		access_token: string;
+		access_token: string
 	}
 
 	const body = (await resp.json()) as authTokenResponse
@@ -99,7 +99,7 @@ export async function fetchUpstreamAuthToken ({
 // Context from the auth process, encrypted & stored in the auth token
 // and provided to the MyMCP as this.props
 export type Props = {
-	name: string;
-	email: string;
-	accessToken: string;
-};
+	name: string
+	email: string
+	accessToken: string
+}

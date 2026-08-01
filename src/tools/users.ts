@@ -11,7 +11,7 @@ import {
 	userRoleSchema,
 	idSchema,
 	nameSchema,
-	emailSchema
+	emailSchema,
 } from '../types/zendesk'
 import { createTool } from '../utils/tool-registry'
 import { withCreateHandling } from '../utils/error-handling'
@@ -24,13 +24,16 @@ export const usersTools: ToolDefinition[] = [
 		'List users in Zendesk',
 		{
 			...paginationSchema,
-			role: z.string().optional().describe('Filter by user role')
+			role: z.string().optional().describe('Filter by user role'),
 		},
-		async (client: ZendeskClient, params: {
-      page?: number;
-      per_page?: number;
-      role?: string;
-    }) => {
+		async (
+			client: ZendeskClient,
+			params: {
+				page?: number
+				per_page?: number
+				role?: string
+			}
+		) => {
 			return client.listUsers(params)
 		}
 	),
@@ -39,7 +42,7 @@ export const usersTools: ToolDefinition[] = [
 		'get_user',
 		'Get a specific user by ID',
 		{
-			id: idSchema.describe('User ID')
+			id: idSchema.describe('User ID'),
 		},
 		async (client: ZendeskClient, { id }: { id: number }) => {
 			return client.getUser(id)
@@ -55,29 +58,29 @@ export const usersTools: ToolDefinition[] = [
 			role: userRoleSchema.optional().describe('User role'),
 			verified: z.boolean().optional().describe('Whether the user is verified'),
 			phone: z.string().optional().describe('User phone number'),
-			organization_id: z.number().optional().describe('Organization ID')
+			organization_id: z.number().optional().describe('Organization ID'),
 		},
-		async (client: ZendeskClient, params: {
-      name: string;
-      email: string;
-      role?: string;
-      verified?: boolean;
-      phone?: string;
-      organization_id?: number;
-    }) => {
+		async (
+			client: ZendeskClient,
+			params: {
+				name: string
+				email: string
+				role?: string
+				verified?: boolean
+				phone?: string
+				organization_id?: number
+			}
+		) => {
 			const userData = {
 				name: params.name,
 				email: params.email,
 				role: params.role,
 				verified: params.verified,
 				phone: params.phone,
-				organization_id: params.organization_id
+				organization_id: params.organization_id,
 			}
 
-			return withCreateHandling(
-				() => client.createUser(userData),
-				'User'
-			)()
+			return withCreateHandling(() => client.createUser(userData), 'User')()
 		}
 	),
 
@@ -90,22 +93,28 @@ export const usersTools: ToolDefinition[] = [
 			verified: z.boolean().optional().describe('Filter by verification status'),
 			organization_id: z.number().optional().describe('Filter by organization ID'),
 			created_after: z.string().optional().describe('Filter users created after date (ISO format)'),
-			created_before: z.string().optional().describe('Filter users created before date (ISO format)'),
+			created_before: z
+				.string()
+				.optional()
+				.describe('Filter users created before date (ISO format)'),
 			...sortingSchema,
-			...paginationSchema
+			...paginationSchema,
 		},
-		async (client: ZendeskClient, params: {
-			query: string;
-			role?: string;
-			verified?: boolean;
-			organization_id?: number;
-			created_after?: string;
-			created_before?: string;
-			sort_by?: string;
-			sort_order?: 'asc' | 'desc';
-			page?: number;
-			per_page?: number;
-		}) => {
+		async (
+			client: ZendeskClient,
+			params: {
+				query: string
+				role?: string
+				verified?: boolean
+				organization_id?: number
+				created_after?: string
+				created_before?: string
+				sort_by?: string
+				sort_order?: 'asc' | 'desc'
+				page?: number
+				per_page?: number
+			}
+		) => {
 			const { query } = params
 
 			// Build the search query with filters
@@ -118,14 +127,15 @@ export const usersTools: ToolDefinition[] = [
 			if (params.created_before) searchQuery += ` created<${params.created_before}`
 
 			return executeSearchWithStandardizedResponse(
-				() => client.search(searchQuery, {
-					sort_by: params.sort_by,
-					sort_order: params.sort_order,
-					page: params.page,
-					per_page: params.per_page
-				}),
+				() =>
+					client.search(searchQuery, {
+						sort_by: params.sort_by,
+						sort_order: params.sort_order,
+						page: params.page,
+						per_page: params.per_page,
+					}),
 				'user'
 			)
 		}
-	)
+	),
 ]

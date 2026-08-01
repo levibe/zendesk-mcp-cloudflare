@@ -35,7 +35,7 @@ export {
 	helpCenterTools,
 	supportTools,
 	talkTools,
-	chatTools
+	chatTools,
 }
 
 // Export organized tool categories for bulk registration
@@ -52,7 +52,7 @@ export const toolCategories = {
 	helpCenter: helpCenterTools,
 	support: supportTools,
 	talk: talkTools,
-	chat: chatTools
+	chat: chatTools,
 }
 
 // Export all tools as a flat array

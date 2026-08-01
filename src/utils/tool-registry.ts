@@ -21,7 +21,7 @@ const READ_ONLY_TOOL_NAMES = new Set(['search', 'support_info'])
 
 export const isReadOnlyTool = (name: string): boolean =>
 	READ_ONLY_TOOL_NAMES.has(name) ||
-	READ_ONLY_TOOL_PREFIXES.some(prefix => name.startsWith(prefix))
+	READ_ONLY_TOOL_PREFIXES.some((prefix) => name.startsWith(prefix))
 
 /**
  * Registers a collection of tools with the MCP server
@@ -35,17 +35,13 @@ export const registerTools = (
 ): string[] => {
 	const withheld: string[] = []
 
-	tools.forEach(tool => {
+	tools.forEach((tool) => {
 		if (!isReadOnlyTool(tool.name)) {
 			withheld.push(tool.name)
 			return
 		}
 
-		server.tool(
-			tool.name,
-			tool.schema,
-			withErrorHandling(tool.handler.bind(null, client))
-		)
+		server.tool(tool.name, tool.schema, withErrorHandling(tool.handler.bind(null, client)))
 	})
 
 	return withheld
@@ -60,12 +56,14 @@ export const registerAllTools = (
 	client: ZendeskClient,
 	toolCategories: Record<string, ToolDefinition[]>
 ): void => {
-	const withheld = Object.values(toolCategories).flatMap(tools =>
+	const withheld = Object.values(toolCategories).flatMap((tools) =>
 		registerTools(server, client, tools)
 	)
 
 	if (withheld.length > 0) {
-		console.log(`Read-only mode: withholding ${withheld.length} write tools (${withheld.join(', ')})`)
+		console.log(
+			`Read-only mode: withholding ${withheld.length} write tools (${withheld.join(', ')})`
+		)
 	}
 }
 
@@ -78,8 +76,8 @@ export const createTool = <T = any>(
 	schema: Record<string, any>,
 	handler: (client: ZendeskClient, params: T) => Promise<any>
 ): ToolDefinition => ({
-		name,
-		description,
-		schema,
-		handler
-	})
+	name,
+	description,
+	schema,
+	handler,
+})

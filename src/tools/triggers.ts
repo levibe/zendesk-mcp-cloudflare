@@ -24,5 +24,5 @@ export const triggersTools: ToolDefinition[] = [
 		async (client: ZendeskClient, { id }: { id: number }) => {
 			return client.getTrigger(id)
 		}
-	)
+	),
 ]

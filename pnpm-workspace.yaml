@@ -14,7 +14,7 @@ minimumReleaseAge: 10080
 # unattended and transitive updates that nobody looked at; this one was chosen
 # and reviewed. Drop this entry once the version ages past 2026-08-05.
 minimumReleaseAgeExclude:
-  - "@cloudflare/workers-oauth-provider"
+  - '@cloudflare/workers-oauth-provider'
 
 # These three ship prebuilt platform binaries and their install scripts only
 # verify or link them. pnpm 11 fails the install outright unless each package
