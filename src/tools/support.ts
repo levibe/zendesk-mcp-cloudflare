@@ -2,7 +2,6 @@
  * Core support functionality tools for fundamental Zendesk Support operations
  */
 
-import type { ZendeskClient } from '../zendesk-client'
 import type { ToolDefinition } from '../types/zendesk'
 import { createTool } from '../utils/tool-registry'
 

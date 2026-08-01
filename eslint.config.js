@@ -35,7 +35,13 @@ export default [
 			'no-mixed-spaces-and-tabs': 'error',
 			
 			// TypeScript-specific rules
-			'@typescript-eslint/no-unused-vars': 'error',
+			// A leading underscore marks something as deliberately unused, which is how
+			// this codebase already flags parked helpers and ignored callback arguments.
+			'@typescript-eslint/no-unused-vars': ['error', {
+				argsIgnorePattern: '^_',
+				varsIgnorePattern: '^_',
+				caughtErrorsIgnorePattern: '^_'
+			}],
 			
 			// Standard-style rules
 			'no-undef': 'off', // TypeScript handles this

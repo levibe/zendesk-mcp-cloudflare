@@ -2,7 +2,7 @@
  * Utilities for standardizing search response formats across all search tools
  */
 
-import type { 
+import type {
 	SearchResponseMetadata,
 	StandardizedSearchResult,
 	StandardizedSearchResponse
@@ -12,7 +12,7 @@ import type {
  * Standardizes search response format by adding result_type to each result
  * and organizing metadata consistently
  */
-export function standardizeSearchResponse(
+export function standardizeSearchResponse (
 	rawResponse: any,
 	defaultResultType?: string
 ): StandardizedSearchResponse {
@@ -24,7 +24,7 @@ export function standardizeSearchResponse(
 	}
 
 	const results = Array.isArray(rawResponse.results) ? rawResponse.results : []
-	
+
 	// Add result_type to each result if not already present
 	const standardizedResults: StandardizedSearchResult[] = results.map((result: any) => {
 		if (!result || typeof result !== 'object') {
@@ -38,7 +38,7 @@ export function standardizeSearchResponse(
 
 		// Try to infer result_type from the object structure
 		let resultType = defaultResultType || 'unknown'
-		
+
 		if (result.url && typeof result.url === 'string') {
 			if (result.url.includes('/tickets/')) {
 				resultType = 'ticket'
@@ -84,7 +84,7 @@ export function standardizeSearchResponse(
 /**
  * Wrapper function for search operations that automatically standardizes the response
  */
-export async function executeSearchWithStandardizedResponse(
+export async function executeSearchWithStandardizedResponse (
 	searchOperation: () => Promise<any>,
 	defaultResultType?: string
 ): Promise<StandardizedSearchResponse> {
