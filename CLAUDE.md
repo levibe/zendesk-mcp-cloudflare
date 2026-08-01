@@ -48,7 +48,11 @@ pnpm run lint:fix        # Lint and auto-fix
 pnpm run validate        # type-check, lint, format:check and build together
 ```
 
-`no-explicit-any` is set to warn rather than error, so `pnpm run lint` currently reports 66 warnings and still exits clean.
+`no-explicit-any` is set to warn rather than error, so `pnpm run lint` currently reports 42 warnings and still exits clean.
+
+The Zendesk client no longer contributes to that count on the read side. `request` and `requestWithRetry` return `Promise<unknown>`, and every list method takes `Record<string, unknown>` for its query parameters, so a caller that wants to reach into a response body has to narrow it first. `src/tools/help-center.ts` is the only place that does — everything else hands the response straight to `JSON.stringify`.
+
+What is left is deliberate rather than overlooked. Twenty of the warnings are the `data` argument on the client's create and update methods, which stays `any` until somebody decides whether hand-maintained Zendesk request payloads are worth the drift (see #8). Five more are in `src/workers-oauth-utils.ts`, which is vendored and is being reworked in #3 and #4.
 
 ### Deployment
 
