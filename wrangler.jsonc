@@ -42,10 +42,15 @@
 			"id": "c862c2ee524d4a45b0f531c67b6add15",
 		},
 	],
-	// Deployment-specific config (ZENDESK_SUBDOMAIN, ZENDESK_EMAIL) is set as plaintext
-	// vars in the Cloudflare dashboard rather than committed here, so this repo stays
-	// generic. keep_vars stops `wrangler deploy` treating this file as the source of
-	// truth and wiping them. Secrets (ZENDESK_API_TOKEN, GOOGLE_*) persist regardless.
+	// Deployment-specific config stays out of this file so the repo reads generically, and all of
+	// it is held as secrets — including ZENDESK_SUBDOMAIN and ZENDESK_EMAIL, neither of which is
+	// sensitive. A plain var would not survive: Workers Builds deploys the production branch with
+	// `wrangler deploy`, which honours the setting below, but builds every other branch with
+	// `wrangler versions upload`, which takes no equivalent and clears plain vars while leaving
+	// encrypted ones alone.
+	//
+	// keep_vars stays because it still covers `wrangler deploy` for any var added later. It is
+	// just not what protects the credentials.
 	// For local development, put all of them in .dev.vars — see .dev.vars.example.
 	"keep_vars": true,
 	"observability": {
