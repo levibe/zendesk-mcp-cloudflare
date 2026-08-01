@@ -60,9 +60,6 @@ export const macroActionSchema = z.object({
 	value: z.any().describe('Value to set'),
 })
 
-// Tool Handler Type
-export type ToolHandler<T = any> = (client: ZendeskClient, params: T) => Promise<any>
-
 // Search Response Types
 export interface SearchResponseMetadata {
 	total_count?: number
