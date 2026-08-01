@@ -13,7 +13,7 @@
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
     "build": "wrangler deploy --dry-run",
-    "validate": "npm run type-check && npm run lint && npm run build"
+    "validate": "pnpm run type-check && pnpm run lint && pnpm run build"
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "^0.8.3",

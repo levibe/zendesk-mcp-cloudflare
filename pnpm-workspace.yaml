@@ -1,3 +1,24 @@
+# pnpm reads its settings from this file. An equivalent "pnpm" block in
+# package.json is silently ignored, so settings belong here.
+
+# Wait a week before installing a newly published version. Compromised releases
+# are normally caught and pulled within hours, so a week's delay sidesteps that
+# window at the cost of picking up new versions a week late. There is no CLI
+# flag to override this per-install; minimumReleaseAgeExclude below is the
+# only escape hatch.
+minimumReleaseAge: 10080
+
+# @cloudflare/workers-oauth-provider 0.8.3 was published on 2026-07-29 and is
+# still inside the week-long window, so the cooldown would otherwise refuse to
+# install the version #1 deliberately upgraded to. The cooldown exists to catch
+# unattended and transitive updates that nobody looked at; this one was chosen
+# and reviewed. Drop this entry once the version ages past 2026-08-05.
+minimumReleaseAgeExclude:
+  - "@cloudflare/workers-oauth-provider"
+
+# These three ship prebuilt platform binaries and their install scripts only
+# verify or link them. pnpm 11 fails the install outright unless each package
+# is answered here, so the decision has to be recorded either way.
 allowBuilds:
   esbuild: true
   sharp: true
