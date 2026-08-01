@@ -45,7 +45,7 @@ pnpm run format          # Format the repository with Prettier
 pnpm run format:check    # Check formatting without writing (used by validate)
 pnpm run lint            # Lint src/ with ESLint
 pnpm run lint:fix        # Lint and auto-fix
-pnpm run validate        # type-check, lint, format:check and build together
+pnpm run validate        # type-check, lint, format:check, test and build together
 ```
 
 `no-explicit-any` is set to warn rather than error, so `pnpm run lint` currently reports 37 warnings and still exits clean.
@@ -116,6 +116,25 @@ The MCP server currently provides these Zendesk tools:
 - `search` - Search across all Zendesk data
 
 ## Testing
+
+### Unit Tests
+
+Vitest, with no runtime of its own. Everything under test is either pure or reachable through a stubbed `fetch`, so nothing here needs `workerd` or the network. If something eventually does, `@cloudflare/vitest-pool-workers` runs the same suite inside the real runtime — but reach for it when a test actually requires it, not before.
+
+```bash
+pnpm run test            # Run the suite once (what validate and CI use)
+pnpm run test:watch      # Re-run on change while working
+```
+
+Tests sit next to the code they cover as `*.test.ts`, which is why `pnpm run lint` and `tsc --noEmit` already reach them without a second path to configure. `wrangler deploy --dry-run` bundles from `src/index.ts` and follows imports, so nothing imports a test file and none of this ships.
+
+Test what branches. Most tools hand a response straight to `JSON.stringify` and have nothing to get wrong; the sanitizers, the retry policy, the response reshaping and the hierarchy walk all make decisions, and those are what earn a test.
+
+Cover a private method through the public one that calls it, rather than casting past `private`. The sanitizers are the reason: asserting on the URL that actually goes out survives a refactor of how the sanitizing is arranged, and asserting on `sanitizeSubdomain` directly does not.
+
+Teardown of spies and stubbed globals belongs in `vitest.config.ts` (`restoreMocks`, `unstubGlobals`), not in a per-file `afterEach`. Both run _before_ each test, so a mock created at module scope would be torn down before the first test ran — create them inside a test or a `beforeEach`. Fake timers have no equivalent switch and still need `vi.useRealTimers()` in an `afterEach`.
+
+Some tests deliberately pin behaviour that looks unintended, so that changing it has to be a decision rather than an accident. Each says so in a comment and names the issue holding the argument. If you fix one of those behaviours, expect to invert its test — that is the pin doing its job, not a regression.
 
 ### Local Testing with MCP Inspector
 
