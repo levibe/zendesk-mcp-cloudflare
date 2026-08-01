@@ -245,11 +245,13 @@ export function renderApprovalDialog(request: Request, options: ApprovalDialogOp
 	const clientName = client?.clientName ? sanitizeHtml(client.clientName) : 'Unknown MCP Client'
 	const serverDescription = server.description ? sanitizeHtml(server.description) : ''
 
-	// Safe URLs
-	const logoUrl = server.logo ? sanitizeHtml(server.logo) : ''
-	const clientUri = client?.clientUri ? sanitizeHtml(client.clientUri) : ''
-	const policyUri = client?.policyUri ? sanitizeHtml(client.policyUri) : ''
-	const tosUri = client?.tosUri ? sanitizeHtml(client.tosUri) : ''
+	// These four are the only client-supplied values that end up inside an `href` or `src`, so
+	// they need the scheme checked as well as the HTML escaped. An empty result is what the
+	// blocks below already treat as "no link", so a rejected URL renders as nothing at all.
+	const logoUrl = server.logo ? sanitizeUrl(server.logo) : ''
+	const clientUri = client?.clientUri ? sanitizeUrl(client.clientUri) : ''
+	const policyUri = client?.policyUri ? sanitizeUrl(client.policyUri) : ''
+	const tosUri = client?.tosUri ? sanitizeUrl(client.tosUri) : ''
 
 	// Client contacts
 	const contacts =
@@ -643,4 +645,39 @@ function sanitizeHtml(unsafe: string): string {
 		.replace(/>/g, '&gt;')
 		.replace(/"/g, '&quot;')
 		.replace(/'/g, '&#039;')
+}
+
+/**
+ * Sanitizes a URL destined for an `href` or `src` attribute, returning '' if it is not an
+ * absolute http: or https: URL.
+ *
+ * Escaping alone is not enough here, which is the whole reason this exists. `sanitizeHtml`
+ * stops a value breaking out of the attribute it sits in, but a dangerous scheme needs none
+ * of the characters it escapes — `javascript:alert(document.cookie)` passes through it
+ * completely untouched, and clicking the resulting link runs script on this worker's own
+ * origin, which is also where the approval cookie lives.
+ *
+ * The check belongs here at the render boundary rather than only at registration.
+ * `@cloudflare/workers-oauth-provider` validates these fields when a client registers, but
+ * `/register` is public and ran for a long time under 0.0.5, which checked only that they
+ * were strings. Records written then sit in KV with no TTL and are read back by `getClient`
+ * unvalidated, so anything already planted keeps working indefinitely. Validating on the way
+ * out holds regardless of what any given library version accepted on the way in.
+ *
+ * The parsed `href` is returned rather than the original input, so what renders is the
+ * canonical, percent-encoded form of what a browser would resolve. It still goes through
+ * `sanitizeHtml`, because URL parsing leaves characters like `'` alone in a path and those
+ * would otherwise break out of the attribute.
+ */
+function sanitizeUrl(unsafe: string): string {
+	let url: URL
+	try {
+		url = new URL(unsafe)
+	} catch {
+		return ''
+	}
+
+	if (url.protocol !== 'http:' && url.protocol !== 'https:') return ''
+
+	return sanitizeHtml(url.href)
 }
