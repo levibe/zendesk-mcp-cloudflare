@@ -3,7 +3,6 @@
  */
 
 import { z } from 'zod'
-import type { ZendeskClient } from '../zendesk-client'
 import type { ToolDefinition } from '../types/zendesk'
 import { paginationSchema, sortingSchema, idSchema } from '../types/zendesk'
 import { createTool } from '../utils/tool-registry'
@@ -47,15 +46,7 @@ export const helpCenterTools: ToolDefinition[] = [
 			...paginationSchema,
 			...sortingSchema,
 		},
-		async (
-			client: ZendeskClient,
-			params: {
-				page?: number
-				per_page?: number
-				sort_by?: string
-				sort_order?: 'asc' | 'desc'
-			}
-		) => {
+		async (client, params) => {
 			return client.listArticles(params)
 		}
 	),
@@ -64,7 +55,7 @@ export const helpCenterTools: ToolDefinition[] = [
 		'get_article',
 		'Get a specific Help Center article by ID',
 		{ id: idSchema.describe('Article ID') },
-		async (client: ZendeskClient, { id }: { id: number }) => {
+		async (client, { id }) => {
 			return client.getArticle(id)
 		}
 	),
@@ -76,14 +67,7 @@ export const helpCenterTools: ToolDefinition[] = [
 			query: z.string().describe('Search query for articles (e.g., "password reset", "billing")'),
 			...paginationSchema,
 		},
-		async (
-			client: ZendeskClient,
-			params: {
-				query: string
-				page?: number
-				per_page?: number
-			}
-		) => {
+		async (client, params) => {
 			const { query, ...searchParams } = params
 			return executeSearchWithStandardizedResponse(
 				() => client.searchArticles({ query, ...searchParams }),
@@ -100,15 +84,7 @@ export const helpCenterTools: ToolDefinition[] = [
 			...paginationSchema,
 			...sortingSchema,
 		},
-		async (
-			client: ZendeskClient,
-			params: {
-				page?: number
-				per_page?: number
-				sort_by?: string
-				sort_order?: 'asc' | 'desc'
-			}
-		) => {
+		async (client, params) => {
 			return client.listCategories(params)
 		}
 	),
@@ -117,7 +93,7 @@ export const helpCenterTools: ToolDefinition[] = [
 		'get_category',
 		'Get a specific Help Center category by ID',
 		{ id: idSchema.describe('Category ID') },
-		async (client: ZendeskClient, { id }: { id: number }) => {
+		async (client, { id }) => {
 			return client.getCategory(id)
 		}
 	),
@@ -129,14 +105,7 @@ export const helpCenterTools: ToolDefinition[] = [
 			query: z.string().describe('Search query for categories (e.g., "billing", "technical")'),
 			...paginationSchema,
 		},
-		async (
-			client: ZendeskClient,
-			params: {
-				query: string
-				page?: number
-				per_page?: number
-			}
-		) => {
+		async (client, params) => {
 			// Use general search with type filter for categories
 			return executeSearchWithStandardizedResponse(
 				() =>
@@ -158,16 +127,7 @@ export const helpCenterTools: ToolDefinition[] = [
 			...paginationSchema,
 			...sortingSchema,
 		},
-		async (
-			client: ZendeskClient,
-			params: {
-				category_id?: number
-				page?: number
-				per_page?: number
-				sort_by?: string
-				sort_order?: 'asc' | 'desc'
-			}
-		) => {
+		async (client, params) => {
 			if (params.category_id) {
 				const { category_id, ...otherParams } = params
 				return client.listSectionsByCategory(category_id, otherParams)
@@ -180,7 +140,7 @@ export const helpCenterTools: ToolDefinition[] = [
 		'get_section',
 		'Get a specific Help Center section by ID',
 		{ id: idSchema.describe('Section ID') },
-		async (client: ZendeskClient, { id }: { id: number }) => {
+		async (client, { id }) => {
 			return client.getSection(id)
 		}
 	),
@@ -195,15 +155,7 @@ export const helpCenterTools: ToolDefinition[] = [
 			category_id: z.number().optional().describe('Limit search to specific category'),
 			...paginationSchema,
 		},
-		async (
-			client: ZendeskClient,
-			params: {
-				query: string
-				category_id?: number
-				page?: number
-				per_page?: number
-			}
-		) => {
+		async (client, params) => {
 			// Build search query
 			let searchQuery = `type:topic ${params.query}`
 			if (params.category_id) {
@@ -232,13 +184,7 @@ export const helpCenterTools: ToolDefinition[] = [
 				.describe('Include articles in the hierarchy (default: false)'),
 			category_id: z.number().optional().describe('Limit to specific category'),
 		},
-		async (
-			client: ZendeskClient,
-			params: {
-				include_articles?: boolean
-				category_id?: number
-			}
-		) => {
+		async (client, params) => {
 			try {
 				// Get categories
 				const categoriesResponse = params.category_id
@@ -305,16 +251,7 @@ export const helpCenterTools: ToolDefinition[] = [
 			...paginationSchema,
 			...sortingSchema,
 		},
-		async (
-			client: ZendeskClient,
-			params: {
-				section_id: number
-				page?: number
-				per_page?: number
-				sort_by?: string
-				sort_order?: 'asc' | 'desc'
-			}
-		) => {
+		async (client, params) => {
 			const { section_id, ...otherParams } = params
 			return client.listArticlesBySection(section_id, otherParams)
 		}

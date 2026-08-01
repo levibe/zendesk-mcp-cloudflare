@@ -2,7 +2,6 @@
  * Agent group management tools for organizing support agents into teams
  */
 
-import type { ZendeskClient } from '../zendesk-client'
 import type { ToolDefinition } from '../types/zendesk'
 import { paginationSchema, idSchema, nameSchema, descriptionSchema } from '../types/zendesk'
 import { createTool } from '../utils/tool-registry'
@@ -13,7 +12,7 @@ export const groupsTools: ToolDefinition[] = [
 		'list_groups',
 		'List agent groups in Zendesk',
 		paginationSchema,
-		async (client: ZendeskClient, params: { page?: number; per_page?: number }) => {
+		async (client, params) => {
 			return client.listGroups(params)
 		}
 	),
@@ -22,7 +21,7 @@ export const groupsTools: ToolDefinition[] = [
 		'get_group',
 		'Get a specific group by ID',
 		{ id: idSchema.describe('Group ID') },
-		async (client: ZendeskClient, { id }: { id: number }) => {
+		async (client, { id }) => {
 			return client.getGroup(id)
 		}
 	),
@@ -34,7 +33,7 @@ export const groupsTools: ToolDefinition[] = [
 			name: nameSchema.describe('Group name'),
 			description: descriptionSchema.describe('Group description'),
 		},
-		async (client: ZendeskClient, params: { name: string; description?: string }) => {
+		async (client, params) => {
 			return withCreateHandling(() => client.createGroup(params), 'Group')()
 		}
 	),

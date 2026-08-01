@@ -26,8 +26,21 @@ const stubClient = (responses: StubbedResponses) => ({
 
 type StubbedClient = ReturnType<typeof stubClient>
 
-const walk = (client: StubbedClient, params: Record<string, unknown> = {}) =>
-	hierarchyTool.handler(client as unknown as ZendeskClient, params)
+/**
+ * What this tool answers with. `ToolDefinition` erases every handler's return type to
+ * `unknown` — tools return different shapes and share one array — so the narrowing happens
+ * once here rather than at each assertion. The test knows which tool it called; the registry
+ * deliberately does not.
+ */
+interface Hierarchy {
+	hierarchy: Array<{ sections: Array<Record<string, unknown>>; [key: string]: unknown }>
+	total_categories: number
+	total_sections: number
+	total_articles?: number
+}
+
+const walk = async (client: StubbedClient, params: Record<string, unknown> = {}) =>
+	(await hierarchyTool.handler(client as unknown as ZendeskClient, params)) as Hierarchy
 
 /** Two categories, three sections between them, three articles between those. */
 const fullTree = () =>
