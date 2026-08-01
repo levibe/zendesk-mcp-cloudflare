@@ -183,6 +183,12 @@ export class ZendeskClient {
 				})
 			}
 
+			// `redirect` is left at its default of `follow`, and a redirect that crosses to
+			// another host is now followed without this header —
+			// `strip_authorization_on_cross_origin_redirect` has been the platform default
+			// since 2025-09-01, and the compatibility date finally sits past it. The second
+			// request goes out unauthenticated and comes back 401, which reads exactly like a
+			// revoked API token. A renamed subdomain is how that would happen here. See #39.
 			const headers: Record<string, string> = {
 				Authorization: this.getAuthHeader(),
 				'Content-Type': 'application/json',
