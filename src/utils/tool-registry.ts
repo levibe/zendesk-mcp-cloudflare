@@ -3,8 +3,8 @@
  * Provides a clean functional approach to tool registration
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import type { ZodRawShape } from 'zod'
+import type { McpServer } from '@modelcontextprotocol/server'
+import { z, type ZodRawShape } from 'zod'
 import type { ZendeskClient } from '../zendesk-client'
 import type { InferParams, ToolDefinition } from '../types/zendesk'
 import { withErrorHandling } from './error-handling'
@@ -64,14 +64,13 @@ export const registerTools = (
 			return
 		}
 
-		// The four-argument overload. Passing the schema as the second argument selects the
-		// one without a description, so every tool's description was collected here and then
-		// dropped, and a client saw a bare name and a parameter list. Field descriptions were
-		// unaffected — those ride inside the JSON schema — which is why nothing looked wrong.
-		server.tool(
+		// `z.object` around the shape is what keeps this off a deprecated path. SDK v2 still
+		// accepts a bare `{ field: z.string() }` record and wraps it internally, but that
+		// overload is marked deprecated, so the wrapping happens here instead. Tool definitions
+		// are unaffected and still spread shared shapes like `paginationSchema` directly.
+		server.registerTool(
 			tool.name,
-			tool.description,
-			tool.schema,
+			{ description: tool.description, inputSchema: z.object(tool.schema) },
 			withErrorHandling(tool.handler.bind(null, client))
 		)
 	})
@@ -80,17 +79,30 @@ export const registerTools = (
 }
 
 /**
- * Registers multiple tool categories at once
- * Useful for bulk registration in the main init function
+ * Registers multiple tool categories at once, returning every name it withheld
  */
 export const registerAllTools = (
 	server: McpServer,
 	client: ZendeskClient,
 	toolCategories: Record<string, ToolDefinition[]>
-): void => {
-	const withheld = Object.values(toolCategories).flatMap((tools) =>
-		registerTools(server, client, tools)
-	)
+): string[] =>
+	Object.values(toolCategories).flatMap((tools) => registerTools(server, client, tools))
+
+/**
+ * Says once what registration will withhold, and what it lets through anyway.
+ *
+ * Deliberately separate from `registerAllTools`, and deliberately derived from the tool
+ * definitions rather than from a registration that has just run. Since #40 the server is
+ * built per request, so a message logged as a side effect of registering would repeat on
+ * every tool call instead of appearing once. What gets withheld is fixed at build time and
+ * depends on nothing per-request, which is why this can be called at module scope and read
+ * as the startup announcement it is meant to be.
+ */
+export const announceWithheldTools = (toolCategories: Record<string, ToolDefinition[]>): void => {
+	const withheld = Object.values(toolCategories)
+		.flat()
+		.map((tool) => tool.name)
+		.filter((name) => !isToolPublished(name))
 
 	if (withheld.length > 0) {
 		console.log(

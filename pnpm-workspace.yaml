@@ -17,14 +17,48 @@ minimumReleaseAgeStrict: true
 # 2026-07-29) while it was still inside the window above, and lockfile
 # verification rejects it on a fresh install. Scoped this way the entry expires
 # by itself: 0.8.4 goes back through the full wait.
+#
+# The five below are #40, the move to MCP revision 2026-07-28. The spec and all
+# of its implementations were published within a day of each other on 2026-07-27
+# and 2026-07-28, so waiting the window out means running a deprecated transport
+# for a week rather than avoiding an unvetted release.
+#
+# Only `server` is imported by this repo. The rest are transitive: `server` pins
+# `core` exactly, and `client` and the v1 `sdk` are both auto-installed peers of
+# `agents`. The v1 entry is the surprising one and it is not a leftover — `agents`
+# still carries the deprecated McpAgent next to the stateless handler, and that
+# half is built on v1, so upgrading does not get us off the old SDK. It leaves
+# when McpAgent does.
+#
+# Only exact pins need naming. Two more packages in this tree are also inside the
+# window — yargs@18.1.0 and partyserver@0.5.9, both reached through `agents` on a
+# caret range — and neither is listed, because pnpm resolves a range to the newest
+# version that clears the wait and picks 18.0.0 and 0.5.8 by itself.
+#
+# `agents` is here for the opposite reason, and it is the trap worth knowing about:
+# ^0.20.0 has no member old enough to pass, but asking for `agents@latest` does not
+# fail — it quietly resolves to 0.18.0, which predates createMcpHandler entirely.
 minimumReleaseAgeExclude:
   - '@cloudflare/workers-oauth-provider@0.8.3'
+  - '@modelcontextprotocol/server@2.0.0'
+  - '@modelcontextprotocol/core@2.0.0'
+  - '@modelcontextprotocol/client@2.0.0'
+  - '@modelcontextprotocol/sdk@1.30.0'
+  - 'agents@0.20.1'
 
 # pnpm 11 fails the install outright (ERR_PNPM_IGNORED_BUILDS) unless every
-# package with an install script is answered here. All three normally just
-# fetch or link a prebuilt platform binary — except sharp, which falls back to
-# a node-gyp build from source when a global libvips is on the machine.
+# package with an install script is answered here. The three permitted ones
+# normally just fetch or link a prebuilt platform binary — except sharp, which
+# falls back to a node-gyp build from source when a global libvips is on the
+# machine.
+#
+# core-js-pure is denied rather than permitted, and it is the one entry here that
+# is not a build at all: its postinstall prints a funding notice and swallows its
+# own errors, so nothing depends on it having run. It arrived with agents 0.20.1
+# in #40, four levels down through mimetext, an email library that has nothing to
+# do with MCP.
 allowBuilds:
+  core-js-pure: false
   esbuild: true
   sharp: true
   workerd: true

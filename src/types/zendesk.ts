@@ -18,11 +18,15 @@ export interface McpToolResponse {
 /**
  * The parameters a handler receives, derived from its own Zod schema.
  *
- * This is the same helper the MCP SDK applies to a tool's schema, so the type a handler
+ * This mirrors the helper the MCP SDK applies to a tool's schema, so the type a handler
  * declares is exactly what the server will hand it at runtime — optional fields included,
- * since `objectOutputType` marks a key optional when its schema accepts `undefined`.
+ * since inference marks a key optional when its schema accepts `undefined`.
+ *
+ * Zod 4 dropped `objectOutputType`, which is what this read before #40. Wrapping the shape
+ * and inferring through it is what the SDK itself now does for a raw shape, and it produces
+ * the same type, so the guarantee `createTool` relies on is unchanged.
  */
-export type InferParams<S extends z.ZodRawShape> = z.objectOutputType<S, z.ZodTypeAny>
+export type InferParams<S extends z.ZodRawShape> = z.infer<z.ZodObject<S>>
 
 /**
  * A registered tool, with its parameter type deliberately erased.

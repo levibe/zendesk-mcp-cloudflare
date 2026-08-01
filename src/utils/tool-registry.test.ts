@@ -6,11 +6,13 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MockInstance } from 'vitest'
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { z } from 'zod'
+import type { McpServer } from '@modelcontextprotocol/server'
 import type { ZendeskClient } from '../zendesk-client'
 import type { McpToolResponse, ToolDefinition } from '../types/zendesk'
 import { toolCategories } from '../tools'
 import {
+	announceWithheldTools,
 	createTool,
 	isReadOnlyTool,
 	isToolPublished,
@@ -18,7 +20,7 @@ import {
 	registerTools,
 } from './tool-registry'
 
-const stubServer = () => ({ tool: vi.fn() })
+const stubServer = () => ({ registerTool: vi.fn() })
 
 type StubbedServer = ReturnType<typeof stubServer>
 
@@ -26,7 +28,7 @@ const register = (server: StubbedServer, tools: ToolDefinition[]) =>
 	registerTools(server as unknown as McpServer, {} as ZendeskClient, tools)
 
 const publishedBy = (server: StubbedServer): string[] =>
-	server.tool.mock.calls.map(([name]) => name as string)
+	server.registerTool.mock.calls.map(([name]) => name as string)
 
 /** A tool of the given name that does nothing, since only its name decides its fate here. */
 const namedTool = (name: string) => createTool(name, `The ${name} tool`, {}, async () => ({}))
@@ -74,21 +76,44 @@ describe('registerTools', () => {
 		expect(publishedBy(server)).toEqual(['list_macros', 'create_macro'])
 	})
 
-	// The SDK picks an overload by argument shape, so handing it the schema one place too early
-	// silently selects the one that takes no description — which is what used to happen, leaving
-	// every client to choose between 36 tools by name alone.
+	// A description reaching the server used to depend on argument position: SDK v1 chose an
+	// overload by shape, so passing the schema one place early silently selected the one taking
+	// no description, and every client had to choose between 36 tools by name alone. v2 names
+	// the field instead, so that particular slip cannot recur — this stays because the property
+	// it was protecting is what matters, not the mechanism that once broke it.
 	it('passes the description along, not just the name and the schema', () => {
 		const server = stubServer()
 		const tool = namedTool('list_macros')
 
 		register(server, [tool])
 
-		expect(server.tool).toHaveBeenCalledWith(
+		expect(server.registerTool).toHaveBeenCalledWith(
 			'list_macros',
-			tool.description,
-			tool.schema,
+			expect.objectContaining({ description: tool.description }),
 			expect.any(Function)
 		)
+	})
+
+	// v2 deprecates handing `registerTool` a bare `{ field: z.string() }` record, so the registry
+	// wraps every shape before passing it on. Asserting the schema parses rather than asserting
+	// on its internals keeps this from pinning how Zod represents an object.
+	it('wraps the shape into a schema the server can validate against', () => {
+		const server = stubServer()
+		const tool = createTool(
+			'list_macros',
+			'List macros',
+			{ page: z.number().optional() },
+			async () => ({})
+		)
+
+		register(server, [tool])
+
+		const [, config] = server.registerTool.mock.calls[0] as unknown as [
+			string,
+			{ inputSchema: z.ZodType },
+		]
+
+		expect(config.inputSchema.parse({ page: 2 })).toEqual({ page: 2 })
 	})
 
 	it('never offers a withheld tool to the server at all', () => {
@@ -96,7 +121,7 @@ describe('registerTools', () => {
 
 		register(server, [namedTool('delete_macro'), namedTool('create_ticket')])
 
-		expect(server.tool).not.toHaveBeenCalled()
+		expect(server.registerTool).not.toHaveBeenCalled()
 	})
 
 	it('reports the withheld names back to the caller', () => {
@@ -116,8 +141,7 @@ describe('registerTools', () => {
 		})
 
 		register(server, [tool])
-		const [, , , handler] = server.tool.mock.calls[0] as unknown as [
-			string,
+		const [, , handler] = server.registerTool.mock.calls[0] as unknown as [
 			string,
 			unknown,
 			() => Promise<McpToolResponse>,
@@ -131,15 +155,6 @@ describe('registerTools', () => {
 })
 
 describe('registerAllTools, over every tool the server defines', () => {
-	// Every call here announces what it withheld, which is noise in the other tests and the
-	// subject of the last one. Created in a beforeEach because restoreMocks undoes it between
-	// tests, and one made at module scope would be gone before the first test ran.
-	let log: MockInstance<typeof console.log>
-
-	beforeEach(() => {
-		log = vi.spyOn(console, 'log').mockImplementation(() => {})
-	})
-
 	const publishEverything = () => {
 		const server = stubServer()
 		registerAllTools(server as unknown as McpServer, {} as ZendeskClient, toolCategories)
@@ -159,12 +174,48 @@ describe('registerAllTools, over every tool the server defines', () => {
 		expect(writes.sort()).toEqual(['create_macro', 'update_macro'])
 	})
 
-	it('says on startup what it withheld and what it let through', () => {
-		publishEverything()
+	it('reports every withheld name back to the caller', () => {
+		const withheld = registerAllTools(
+			stubServer() as unknown as McpServer,
+			{} as ZendeskClient,
+			toolCategories
+		)
+
+		expect(withheld).toContain('delete_ticket')
+		expect(withheld).not.toContain('create_macro')
+	})
+})
+
+describe('announceWithheldTools', () => {
+	// Created in a beforeEach because restoreMocks undoes it between tests, and one made at
+	// module scope would be gone before the first test ran.
+	let log: MockInstance<typeof console.log>
+
+	beforeEach(() => {
+		log = vi.spyOn(console, 'log').mockImplementation(() => {})
+	})
+
+	it('says what it withheld and what it let through', () => {
+		announceWithheldTools(toolCategories)
 
 		expect(log).toHaveBeenCalledWith(
 			expect.stringContaining('Permitted writes: create_macro, update_macro')
 		)
 		expect(log).toHaveBeenCalledWith(expect.stringContaining('delete_ticket'))
+	})
+
+	// The reason this is a function of the definitions rather than a side effect of registering:
+	// since #40 the server is rebuilt per request, so announcing from inside registration would
+	// repeat the whole list on every tool call.
+	it('needs no server, so it can be said once at startup', () => {
+		announceWithheldTools(toolCategories)
+
+		expect(log).toHaveBeenCalledTimes(1)
+	})
+
+	it('stays quiet when nothing is withheld', () => {
+		announceWithheldTools({ reads: [namedTool('list_macros')] })
+
+		expect(log).not.toHaveBeenCalled()
 	})
 })

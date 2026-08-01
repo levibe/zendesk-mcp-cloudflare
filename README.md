@@ -29,7 +29,7 @@ Writing is limited to creating and updating macros. [Available Tools](#available
 ### Technical Features
 
 - **Google OAuth Authentication**: Secure user authentication flow
-- **Remote MCP Protocol**: Server-Sent Events (SSE) connection for real-time communication
+- **Remote MCP Protocol**: Streamable HTTP, stateless — each request stands alone, with no session to establish or keep alive
 - **Cloudflare Workers**: Serverless deployment with global edge distribution
 - **Type Safety**: Full TypeScript implementation with Zod validation
 - **Error Handling**: Comprehensive error handling with user-friendly messages
@@ -148,7 +148,9 @@ An Owner on Team or Enterprise can instead enable the connector for the whole or
 
 Either way the connector follows the account rather than the machine, so it appears in Claude Desktop and at claude.ai both, and `claude_desktop_config.json` is not involved at all.
 
-Use `/mcp` rather than `/sse`. `src/index.ts` mounts both, and `/sse` is the superseded transport kept for older clients — hand a current client `/sse` and it will POST there, take a 404, and fall back.
+`/mcp` is the only endpoint. `/sse` served the superseded HTTP+SSE transport, which MCP revision 2026-07-28 deprecates outright, and it has been removed — a client configured against it now gets nothing. Clients too old to speak the current revision are still served at `/mcp`, so on transport grounds this only strands one that can speak HTTP+SSE and nothing else.
+
+One other kind of client is turned away, for an unrelated reason. The server validates the `Origin` header whenever a request carries one. By default it accepts localhost, and also the worker's own hostname when you are on a `workers.dev` address — so a page served from the worker itself is fine, while a custom domain is left allowing localhost alone. Any other origin gets a 403. Nothing described on this page is affected, since a connector is fetched by Anthropic's servers and `mcp-remote` runs under Node, and neither sends an `Origin` at all. It is simply the first thing to check if a browser-based client fails with a message about origins rather than about transports.
 
 Anthropic's infrastructure makes this connection rather than the user's machine, so the worker has to be reachable over the public internet, which a deployed worker already is. That is also the property that makes this route viable for people who will never open a terminal: nothing runs locally, so there is nothing local to go wrong. `HOSTED_DOMAIN` still governs who may sign in, so a connector does not widen access.
 
@@ -186,7 +188,7 @@ This route asks a lot more of the machine, and the failures are worth knowing be
 
 - **Node has to be installed.** `npx` is not present on a machine without Node, which rules this out for most non-technical users on its own.
 - **Two timers run against first-time sign-in, and both are short.** `mcp-remote` waits 30 seconds for the OAuth callback unless `--auth-timeout` says otherwise, and Claude Desktop separately cancels a server that has not finished initializing within 60 seconds. Picking a Google account can outlast either. The symptom is a browser landing on `localhost:<port>` with nothing listening, because the proxy was gone before the redirect came back. Retrying usually works, since the second attempt reuses the approval cookie and the Google session — which is exactly why this is easy to dismiss as a fluke.
-- **An idle stream gets dropped.** Node's fetch abandons a response body after 300 seconds of silence, so a quiet SSE connection dies with `Body Timeout Error` and the proxy reconnects underneath you. Reconnecting can re-enter the auth path and open a browser window unprompted.
+- **A slow tool call gets dropped.** Node's fetch abandons a response body after 300 seconds of silence, which surfaces as `Body Timeout Error` and a reconnect underneath you — and reconnecting can re-enter the auth path and open a browser window unprompted. This used to be the common failure, because the server held a stream open between calls for the old transport to push down. It no longer holds one, so the only way to sit silent that long now is a single Zendesk request taking five minutes.
 - **Windows cannot find `npx`.** Claude Desktop spawns the command without a shell, so the `.cmd` shim never resolves. Use `"command": "cmd"` with `"args": ["/c", "npx", "mcp-remote", "<your-url>"]`.
 - **Tokens are cached on disk.** They live in `~/.mcp-auth` on macOS and `%USERPROFILE%\.mcp-auth` on Windows. Delete that folder if authentication gets stuck after a URL change. A stale lockfile there needs no attention, since the proxy detects and clears it.
 
