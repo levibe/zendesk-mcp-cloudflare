@@ -35,6 +35,7 @@ const createServer = (env: Env) => {
 	const server = new McpServer({
 		name: 'Zendesk API Server',
 		version: '1.0.0',
+		description: 'Remote MCP Server for interacting with the Zendesk API',
 	})
 
 	registerAllTools(server, new ZendeskClient(undefined, env), toolCategories)
@@ -64,10 +65,14 @@ const createServer = (env: Env) => {
  * Origin checking is left at its default, which is deliberate rather than overlooked. A
  * request carrying no `Origin` header always passes, so every client that reaches this
  * server today is unaffected: Anthropic's connector fetches server-side, and `mcp-remote` and
- * the Inspector proxy are both Node. A browser-based client is a different matter — on a
- * custom domain the default accepts localhost only, so any other origin gets a 403 that says
- * nothing about transports. Widen it with `allowedOriginHostnames` if one ever needs to
- * connect, rather than reaching for `'*'`, which turns the check off everywhere.
+ * the Inspector proxy are both Node.
+ *
+ * A browser-based client is a different matter, and what the default permits depends on where
+ * this is deployed. It accepts localhost, plus the endpoint's own hostname when that hostname
+ * is a `workers.dev` address — so a page served by the worker itself can call it there, and a
+ * custom domain is left with localhost alone. Anything else gets a 403 naming the origin and
+ * saying nothing about transports. Widen it by naming hostnames in `allowedOriginHostnames`
+ * rather than reaching for `'*'`, which turns the check off everywhere.
  */
 const mcpHandler = {
 	fetch: (request: Request, env: Env, ctx: ExecutionContext): Promise<Response> =>

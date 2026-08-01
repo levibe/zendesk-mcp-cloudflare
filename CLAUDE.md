@@ -27,7 +27,9 @@ Two things follow that are easy to get wrong. Work that should happen once per i
 
 `/sse` no longer exists. It served the HTTP+SSE transport, which this revision reclassifies as formally deprecated, and it was the last thing requiring the Durable Object. Older clients are not stranded by that, since `createMcpHandler` defaults to `legacy: 'stateless'` and still answers requests that arrive without the 2026-07-28 envelope; what stopped working is a client that can speak nothing but HTTP+SSE.
 
-Origin checking arrived with the same handler and is worth knowing about separately, because it fails in a way that looks unrelated. A request with no `Origin` header always passes, which covers everything reaching this server now — the connector fetches server-side, and `mcp-remote` and the Inspector proxy are Node. A browser-based client on any other origin gets a 403 naming the origin and nothing else. `allowedOriginHostnames` is where to widen it, one hostname at a time rather than `'*'`.
+Origin checking arrived with the same handler and is worth knowing about separately, because it fails in a way that looks unrelated. A request with no `Origin` header always passes, which covers everything reaching this server now — the connector fetches server-side, and `mcp-remote` and the Inspector proxy are Node.
+
+What the default permits a browser depends on the deployment, which is the part that catches people out. It accepts localhost, and additionally the endpoint's own hostname when that is a `workers.dev` address; a custom domain therefore allows localhost and nothing else. Any other origin gets a 403 naming the origin and saying nothing about transports. `allowedOriginHostnames` is where to widen it, one hostname at a time rather than `'*'`.
 
 ### Key Files
 
