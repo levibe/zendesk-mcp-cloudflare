@@ -20,7 +20,7 @@
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"build": "wrangler deploy --dry-run",
-		"validate": "pnpm run type-check && pnpm run lint && pnpm run format:check && pnpm run build"
+		"validate": "pnpm run type-check && pnpm run lint && pnpm run format:check && pnpm run test && pnpm run build"
 	},
 	"dependencies": {
 		"@cloudflare/workers-oauth-provider": "^0.8.3",

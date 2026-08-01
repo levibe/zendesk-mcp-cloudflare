@@ -46,7 +46,7 @@ jobs:
       # lockfile entry, on a machine with no warm verification cache.
       - run: pnpm install --frozen-lockfile
 
-      # These four are what `pnpm run validate` chains together, in the same
+      # These five are what `pnpm run validate` chains together, in the same
       # order. Split apart so the checks UI names the one that failed; validate
       # stays as the single command to run locally.
       - name: Type check
@@ -57,6 +57,9 @@ jobs:
 
       - name: Format check
         run: pnpm run format:check
+
+      - name: Test
+        run: pnpm run test
 
       - name: Build
         run: pnpm run build
