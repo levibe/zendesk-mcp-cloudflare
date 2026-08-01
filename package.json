@@ -12,8 +12,10 @@
     "type-check": "tsc --noEmit",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "build": "wrangler deploy --dry-run",
-    "validate": "pnpm run type-check && pnpm run lint && pnpm run build"
+    "validate": "pnpm run lint && pnpm run format:check && pnpm run type-check && pnpm run build"
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "^0.8.3",
