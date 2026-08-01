@@ -23,10 +23,12 @@ announceWithheldTools(toolCategories)
  * Do not, and know what goes wrong if you do, because it is not what you would expect.
  * `Server.connect` overwrites `_transport` without complaint, so a shared instance answers
  * sequential requests perfectly well and looks fine in local testing. The damage shows up
- * only under concurrency: the second request's `connect` steals the transport out from under
- * the first exchange while it is still in flight, and both hang until the platform gives up
- * on them. The single-use check that does exist guards the transport rather than the server,
- * and never fires here, since a fresh transport is built per request either way.
+ * only under concurrency: each new `connect` takes the transport away from whatever exchange
+ * is still in flight, leaving it with nowhere to send its response. Every request but the
+ * newest hangs, and the newest always returns normally — so the endpoint goes on looking
+ * healthy while requests are quietly stranded behind it. The single-use check that does exist
+ * guards the transport rather than the server, and never fires here, since a fresh transport
+ * is built per request either way.
  *
  * The client is built per request for the same reason, and costs nothing to make — it holds
  * configuration read from `env` and opens no connection of its own.
