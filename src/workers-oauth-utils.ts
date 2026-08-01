@@ -125,7 +125,25 @@ async function getApprovedClientsFromCookie(
 	}
 
 	const [signatureHex, base64Payload] = parts
-	const payload = atob(base64Payload) // Assuming payload is base64 encoded JSON string
+
+	// `atob` throws on any character outside the base64 alphabet, and the cookie only has to
+	// look structurally right — two dot-separated parts — to reach here. Left unhandled that
+	// throw escapes to Hono as a 500, and since the cookie is written with a one-year Max-Age
+	// the user then gets that 500 on every subsequent /authorize until they clear cookies by
+	// hand. Returning null instead falls through to the approval dialog, which is what every
+	// other malformed-cookie case below already does.
+	//
+	// This is deliberately its own try rather than an extension of the one further down. That
+	// one starts after `importKey`, which throws when COOKIE_ENCRYPTION_KEY is missing — a
+	// deployment being misconfigured, not a cookie being bad. Widening a single try over both
+	// would silently answer a missing secret with the approval dialog forever.
+	let payload: string
+	try {
+		payload = atob(base64Payload)
+	} catch {
+		console.warn('Cookie payload is not valid base64.')
+		return null
+	}
 
 	const key = await importKey(secret)
 	const isValid = await verifySignature(key, signatureHex, payload)
