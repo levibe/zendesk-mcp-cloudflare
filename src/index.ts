@@ -31,8 +31,8 @@ announceWithheldTools(toolCategories)
  * flight on that instance; those handlers drop their results, and the HTTP requests waiting on
  * them never settle. So the endpoint keeps answering while some fraction of traffic silently
  * fails to come back — which is a far worse thing to debug than an exception would be. Do not
- * reason from which request "wins": that depends on completion order, and the failure is easy
- * to describe wrongly, as two rounds of review on this comment established.
+ * reason from which request "wins": the one that survives tracks completion order rather than
+ * arrival order, and guessing at it is how this comment has been wrong before.
  *
  * The client is built per request for the same reason, and costs nothing to make — it holds
  * configuration read from `env` and opens no connection of its own.
