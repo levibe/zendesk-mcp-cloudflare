@@ -96,8 +96,10 @@ export async function fetchUpstreamAuthToken({
 	return [body.access_token, null]
 }
 
-// Context from the auth process, encrypted & stored in the auth token
-// and provided to the MyMCP as this.props
+// Context from the auth process, encrypted into the access token by OAuthProvider and
+// readable inside a tool through getMcpAuthContext(). Nothing reads it today — the Zendesk
+// credentials come from `env`, not from the signed-in user — so this describes what the
+// token carries rather than something the server currently acts on.
 export type Props = {
 	name: string
 	email: string

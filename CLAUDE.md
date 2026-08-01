@@ -19,13 +19,15 @@ This is a remote Model Context Protocol (MCP) server that integrates Zendesk API
 
 MCP revision 2026-07-28 removed protocol-level sessions, and this server is built the way that implies. `src/index.ts` hands `createMcpHandler` a factory, and the factory builds a fresh `McpServer` and a fresh `ZendeskClient` for every request. Nothing is cached across calls and nothing needs to be: the client holds configuration read from `env` and opens no connection, and every tool is one request to Zendesk whose result goes straight back.
 
-This is not a style preference and it cannot be optimised away by hoisting the server to module scope. SDK v2 refuses a second transport on a `Server` that already has one, so a shared instance fails on the second request rather than leaking state quietly.
+This is not a style preference, and hoisting the server to module scope to save rebuilding the tools is the mistake to know about. Nothing stops you: `Server.connect` replaces its transport without complaint, so a shared instance answers sequential requests correctly and looks fine locally. It fails only under concurrency, where the second request's `connect` takes the transport away from an exchange still in flight and both hang. The SDK's single-use check sits on the transport, not the server, so it never fires to warn you.
 
 Anything genuinely needing to survive across calls has to become an explicit handle: the server mints it, returns it, and the model passes it back as an ordinary tool argument. There is nowhere else to put it.
 
 Two things follow that are easy to get wrong. Work that should happen once per isolate must not sit inside the factory, or it repeats on every tool call — `announceWithheldTools` is separate from `registerAllTools` for exactly this reason, and the comment on it explains the split. And `this.env` is gone along with the class, so `env` arrives as a `fetch` argument and is threaded to whatever needs it.
 
 `/sse` no longer exists. It served the HTTP+SSE transport, which this revision reclassifies as formally deprecated, and it was the last thing requiring the Durable Object. Older clients are not stranded by that, since `createMcpHandler` defaults to `legacy: 'stateless'` and still answers requests that arrive without the 2026-07-28 envelope; what stopped working is a client that can speak nothing but HTTP+SSE.
+
+Origin checking arrived with the same handler and is worth knowing about separately, because it fails in a way that looks unrelated. A request with no `Origin` header always passes, which covers everything reaching this server now — the connector fetches server-side, and `mcp-remote` and the Inspector proxy are Node. A browser-based client on any other origin gets a 403 naming the origin and nothing else. `allowedOriginHostnames` is where to widen it, one hostname at a time rather than `'*'`.
 
 ### Key Files
 

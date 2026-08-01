@@ -16,10 +16,17 @@ announceWithheldTools(toolCategories)
  * Builds the server that answers one request, and only one.
  *
  * MCP revision 2026-07-28 removed protocol-level sessions, so there is no longer a
- * connection for a server instance to belong to. SDK v2 enforces that directly: a `Server`
- * that has already been connected to a transport refuses a second transport, which turns a
- * module-scope singleton from something that happened to work into an error on the second
- * request. Constructing here is what the factory is for.
+ * connection for a server instance to belong to. `createMcpHandler` calls this factory once
+ * per request by contract, which is the whole of the guarantee — nothing at runtime stops a
+ * caller hoisting an `McpServer` to module scope and closing over it instead.
+ *
+ * Do not, and know what goes wrong if you do, because it is not what you would expect.
+ * `Server.connect` overwrites `_transport` without complaint, so a shared instance answers
+ * sequential requests perfectly well and looks fine in local testing. The damage shows up
+ * only under concurrency: the second request's `connect` steals the transport out from under
+ * the first exchange while it is still in flight, and both hang until the platform gives up
+ * on them. The single-use check that does exist guards the transport rather than the server,
+ * and never fires here, since a fresh transport is built per request either way.
  *
  * The client is built per request for the same reason, and costs nothing to make — it holds
  * configuration read from `env` and opens no connection of its own.
@@ -53,6 +60,14 @@ const createServer = (env: Env) => {
  * handler's own `fetch` takes `(request, options)` — passing the handler straight through
  * would land `env` in the options argument. Calling the handler itself, which does take the
  * three, is what keeps `ctx.props` reaching `getMcpAuthContext()` inside a tool.
+ *
+ * Origin checking is left at its default, which is deliberate rather than overlooked. A
+ * request carrying no `Origin` header always passes, so every client that reaches this
+ * server today is unaffected: Anthropic's connector fetches server-side, and `mcp-remote` and
+ * the Inspector proxy are both Node. A browser-based client is a different matter — on a
+ * custom domain the default accepts localhost only, so any other origin gets a 403 that says
+ * nothing about transports. Widen it with `allowedOriginHostnames` if one ever needs to
+ * connect, rather than reaching for `'*'`, which turns the check off everywhere.
  */
 const mcpHandler = {
 	fetch: (request: Request, env: Env, ctx: ExecutionContext): Promise<Response> =>
