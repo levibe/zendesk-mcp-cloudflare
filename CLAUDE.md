@@ -34,6 +34,20 @@ pnpm run dev             # Start local development server (localhost:8788)
 pnpm run type-check      # Run TypeScript type checking
 ```
 
+### Code Quality
+
+Prettier owns formatting and ESLint owns everything else. ESLint's formatting rules are switched off through `eslint-config-prettier`, so the two never disagree — don't add stylistic rules back to `eslint.config.mjs`.
+
+```bash
+pnpm run format          # Format the repository with Prettier
+pnpm run format:check    # Check formatting without writing (used by validate)
+pnpm run lint            # Lint src/ with ESLint
+pnpm run lint:fix        # Lint and auto-fix
+pnpm run validate        # lint, format:check, type-check and build together
+```
+
+`no-explicit-any` is set to warn rather than error, so `pnpm run lint` currently reports 66 warnings and still exits clean.
+
 ### Deployment
 
 ```bash
