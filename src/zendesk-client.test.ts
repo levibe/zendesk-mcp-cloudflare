@@ -5,7 +5,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ZendeskClient } from './zendesk-client'
+import { ZendeskClient, ZendeskRequestError } from './zendesk-client'
 
 const credentials = {
 	subdomain: 'example',
@@ -231,6 +231,29 @@ describe('request', () => {
 		)
 	})
 
+	// The status is what the retry policy classifies on, so it has to survive the rewrap that
+	// turns the failure into a sentence. Asserting it here is asserting the thing that makes
+	// requestWithRetry able to tell a 429 from a body that quotes one.
+	it('carries the status Zendesk answered with', async () => {
+		stubFetch(async () => failedResponse(429, 'Number of allowed API requests per minute'))
+
+		const failure = client.request('GET', '/tickets.json')
+
+		await expect(failure).rejects.toBeInstanceOf(ZendeskRequestError)
+		await expect(failure).rejects.toHaveProperty('status', 429)
+	})
+
+	it('leaves the status unset when the request never got an answer', async () => {
+		stubFetch(async () => {
+			throw new TypeError('fetch failed')
+		})
+
+		const failure = client.request('GET', '/tickets.json')
+
+		await expect(failure).rejects.toBeInstanceOf(ZendeskRequestError)
+		await expect(failure).rejects.toHaveProperty('status', undefined)
+	})
+
 	// `request` rewraps every failure, so the Zendesk error itself survives only as the cause.
 	// executeSearchWithStandardizedResponse reads that back out into metadata.errorCause, and
 	// asserting only on the message above would let the two halves drift apart unnoticed:
@@ -318,15 +341,19 @@ describe('requestWithRetry', () => {
 		}
 	)
 
-	it.each(['timeout', 'ECONNRESET', 'ETIMEDOUT'])(
-		'retries a fetch that failed with %s',
-		async (reason) => {
+	// fetch reports a socket failure as a bare "fetch failed" with the real error as its
+	// cause, so the code that identifies it is a link down the chain rather than in hand.
+	it.each(['ECONNRESET', 'ETIMEDOUT', 'ECONNREFUSED'])(
+		'retries a connection that failed with %s',
+		async (code) => {
 			const fetchMock = stubFetch(async () => {
-				throw new Error(`fetch failed: ${reason}`)
+				throw new TypeError('fetch failed', {
+					cause: Object.assign(new Error(`read ${code}`), { code }),
+				})
 			})
 
 			const attempt = client.requestWithRetry('GET', '/tickets.json')
-			const rejects = expect(attempt).rejects.toThrow(reason)
+			const rejects = expect(attempt).rejects.toThrow('fetch failed')
 			await drainBackoff()
 			await rejects
 
@@ -334,38 +361,48 @@ describe('requestWithRetry', () => {
 		}
 	)
 
-	it('does not retry a 400', async () => {
-		const fetchMock = stubFetch(async () => failedResponse(400, 'bad request'))
+	it('does not retry a connection error with no code to go on', async () => {
+		const fetchMock = stubFetch(async () => {
+			throw new TypeError('fetch failed')
+		})
+
+		await expect(client.requestWithRetry('GET', '/tickets.json')).rejects.toThrow('fetch failed')
+
+		expect(fetchMock).toHaveBeenCalledTimes(1)
+	})
+
+	// 500 is in here deliberately. It is a server error and it is not retried, because Zendesk
+	// uses it for faults that will fail the same way again — 502, 503 and 504 are the ones
+	// that mean the request never reached a healthy backend.
+	it.each([400, 401, 403, 404, 422, 500])('does not retry a %i', async (status) => {
+		const fetchMock = stubFetch(async () => failedResponse(status, 'refused'))
 
 		await expect(client.requestWithRetry('GET', '/tickets.json')).rejects.toThrow(
-			'Zendesk API Error: 400'
+			`Zendesk API Error: ${status}`
 		)
 		expect(fetchMock).toHaveBeenCalledTimes(1)
 	})
 
-	// The classifier substring-matches the whole error message, and `request` builds that
-	// message out of the response body. So a 400 that merely mentions 502 anywhere in its
-	// body is retried three times. Pinned as the behaviour it is, not the behaviour it wants
-	// — see #18, which will invert this test.
-	it('retries a 400 whose body happens to mention 502', async () => {
+	// This was #18. The classifier used to search the error message, which `request` builds
+	// out of the response body, so three digits quoted in that body were indistinguishable
+	// from the status itself. It reads `status` now, so the body can say whatever it likes.
+	it('does not retry a 400 whose body happens to mention 502', async () => {
 		const fetchMock = stubFetch(async () =>
 			failedResponse(400, '{"description":"upstream returned 502 earlier"}')
 		)
 
-		const attempt = client.requestWithRetry('GET', '/tickets.json')
-		const rejects = expect(attempt).rejects.toThrow('Zendesk API Error: 400')
-		await drainBackoff()
-		await rejects
+		await expect(client.requestWithRetry('GET', '/tickets.json')).rejects.toThrow(
+			'Zendesk API Error: 400'
+		)
 
-		expect(fetchMock).toHaveBeenCalledTimes(3)
+		expect(fetchMock).toHaveBeenCalledTimes(1)
 	})
 
-	// `isRetryableError` has an `error.name === 'AbortError'` branch, but nothing reaches it
-	// from here: `request` rewraps every failure into a plain Error, and the abort message
-	// contains none of the substrings the classifier looks for. A timed-out request is
-	// therefore tried exactly once. That is the current behaviour, and it looks unintended
-	// — see #17, which will invert this test.
-	it('does not retry a request the 30 second timeout aborted', async () => {
+	// This was #17. The AbortError is two links down the chain once `request` has rewrapped
+	// it, which is why the classifier walks `cause` rather than looking only at what it was
+	// handed. The step-by-step advance is the point of the test as much as the count is: a
+	// hung endpoint now costs three 30s waits plus the backoff before it gives up.
+	it('retries a request the 30 second timeout aborted', async () => {
 		const fetchMock = stubFetch(
 			(_url, init) =>
 				new Promise<Response>((_resolve, reject) => {
@@ -379,11 +416,20 @@ describe('requestWithRetry', () => {
 
 		const attempt = client.requestWithRetry('GET', '/tickets.json')
 		const rejects = expect(attempt).rejects.toThrow('The operation was aborted.')
-		await vi.advanceTimersByTimeAsync(30_000)
-		await drainBackoff()
-		await rejects
 
+		await vi.advanceTimersByTimeAsync(30_000) // first attempt times out
 		expect(fetchMock).toHaveBeenCalledTimes(1)
+
+		await vi.advanceTimersByTimeAsync(1_000) // backoff, then the second attempt starts
+		await vi.advanceTimersByTimeAsync(30_000)
+		expect(fetchMock).toHaveBeenCalledTimes(2)
+
+		await vi.advanceTimersByTimeAsync(2_000)
+		await vi.advanceTimersByTimeAsync(30_000)
+		expect(fetchMock).toHaveBeenCalledTimes(3)
+
+		await rejects
+		expect(vi.getTimerCount()).toBe(0)
 	})
 
 	it('waits one second, then two, and never sleeps after the last attempt', async () => {
