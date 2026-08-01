@@ -4,6 +4,7 @@
  */
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import type { ZodTypeAny } from 'zod'
 import type { ZendeskClient } from '../zendesk-client'
 import type { ToolDefinition } from '../types/zendesk'
 import { withErrorHandling } from './error-handling'
@@ -73,7 +74,7 @@ export const registerAllTools = (
 export const createTool = <T = any>(
 	name: string,
 	description: string,
-	schema: Record<string, any>,
+	schema: Record<string, ZodTypeAny>,
 	handler: (client: ZendeskClient, params: T) => Promise<any>
 ): ToolDefinition => ({
 	name,
