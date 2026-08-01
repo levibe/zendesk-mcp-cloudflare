@@ -11,7 +11,16 @@
 	// and no new behaviour, so when this moves again, read the workerd version out of the
 	// lockfile and use that date rather than today's.
 	"compatibility_date": "2026-07-22",
-	"compatibility_flags": ["nodejs_compat"],
+	// nodejs_compat_populate_process_env became default on 2025-04-01, and the date above now
+	// sits past it, so vars and secrets would otherwise be copied onto process.env. Nothing in
+	// the bundle reads process.env — not this code and none of the dependencies — so declining
+	// it costs nothing and keeps the credentials reachable only through the env binding, which
+	// has to be passed rather than read off a global.
+	//
+	// This narrows the surface rather than closing it. Anything able to read process.env could
+	// equally patch globalThis.fetch, and zendesk-client.ts puts a Basic credential on every
+	// outbound call, so treat this as one layer and not as a boundary.
+	"compatibility_flags": ["nodejs_compat", "nodejs_compat_do_not_populate_process_env"],
 	"migrations": [
 		{
 			"new_sqlite_classes": ["MyMCP"],
