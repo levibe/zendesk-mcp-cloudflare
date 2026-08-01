@@ -135,7 +135,9 @@ Read `coverage/index.html` rather than the terminal table when you want the full
 
 CI runs `test:coverage` and posts the result as a comment on the pull request, so the report is something a reviewer reads rather than something someone has to go and generate. `validate` stays on the bare `test`, which keeps the local loop to the question you usually have — did anything break.
 
-That comment is a map of what is untested, and nothing gates on the overall number. A single figure over all of `src/` is diluted by design here, since the untested tools and the vendored OAuth code are deliberately in the denominator, so a floor under it would mostly reward covering passthrough code. Per-file thresholds on the modules that branch are the useful form of that idea, and are being worked out in #26.
+That comment is a map of what is untested, and nothing gates on the overall number. A single figure over all of `src/` is diluted by the denominator described above, so a floor under it would mostly reward covering passthrough code. Per-file thresholds on the modules that branch are the useful form of that idea, and are being worked out in #26.
+
+Posting that comment needs a token that can write to pull requests, so it happens in a second CI job that only checks out and reads the coverage json. Keep it that way. The job running `pnpm install` executes the dependency build scripts `pnpm-workspace.yaml` allows, and a writable token has no business sitting on the same runner while that happens.
 
 The `json-summary` and `json` reporters exist for that comment rather than for people; `text` and `html` are the ones to read locally. `reportOnFailure` is on so a failing run still explains itself.
 

@@ -15,14 +15,12 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Inherits the read-only block above. Reporting coverage needs a token that can
+  # write to pull requests, and that lives in its own job below rather than here,
+  # where dependency install scripts run.
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Overrides the workflow-wide block above for this job, so contents: read has
-    # to be restated. The write is what lets the coverage step leave its comment.
-    permissions:
-      contents: read
-      pull-requests: write
     steps:
       # persist-credentials: false keeps the checkout token out of .git/config.
       # Nothing here pushes, and the install step below runs dependency build
@@ -65,29 +63,77 @@ jobs:
         run: pnpm run format:check
 
       # test:coverage rather than test, so the one run that happens here also
-      # produces the json the reporting step below reads. validate stays on the
-      # bare test locally, where coverage is something you ask for deliberately.
+      # produces the json the reporting job reads. validate stays on the bare
+      # test locally, where coverage is something you ask for deliberately.
       - name: Test
         run: pnpm run test:coverage
 
       - name: Build
         run: pnpm run build
 
-      # Renders the coverage json as a job summary and as a single pull request
-      # comment that gets rewritten in place on each push.
+      # Hand the json to the reporting job rather than reporting from here. Only
+      # the two files it reads, so the html report does not ride along.
+      #
+      # Uploads after a failed step too, since reportOnFailure means a red run
+      # still produced something worth reporting. if-no-files-found: ignore
+      # covers the case where an earlier check failed before the tests ran, and
+      # there is no coverage/ to collect at all.
+      - name: Upload coverage
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage
+          path: |
+            coverage/coverage-summary.json
+            coverage/coverage-final.json
+          if-no-files-found: ignore
+          retention-days: 1
+
+  # Separate job so that pull-requests: write never shares a runner with
+  # `pnpm install`, which executes the build scripts pnpm-workspace.yaml answers
+  # for. Nothing here installs or runs project code — it checks out, unpacks the
+  # json and reports.
+  coverage-report:
+    needs: validate
+    # Runs even when validate failed, since a red run is when the report has the
+    # most to say. !cancelled() rather than always() so cancelling a superseded
+    # run leaves no comment behind. Pull requests only: a push to main has
+    # nothing to comment on.
+    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      # The action reads coverage.thresholds out of vitest.config.ts, so the
+      # config has to be on disk. persist-credentials: false for the same reason
+      # as in validate, and more so here, where the token can write.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # A missing artifact means validate failed before the tests ran. That is a
+      # run with nothing to report, not a reason to fail a second time.
+      - name: Download coverage
+        id: coverage
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: coverage
+          path: coverage
+
+      # Renders the json as a job summary and as a single pull request comment
+      # that gets rewritten in place on each push.
       #
       # Pinned to the commit behind v2.12.2 rather than to the tag, because a tag
       # can be moved to point at something else. This is the only third-party
-      # action here — the rest are actions/* and pnpm/* — and it is the one that
-      # runs with a token that can write to pull requests.
-      #
-      # Runs even when an earlier step failed, since a red run is when the report
-      # is worth reading. !cancelled() rather than always() so that cancelling a
-      # superseded run does not leave a comment behind.
+      # action here — the rest are actions/* and pnpm/*.
       - name: Report coverage
-        if: ${{ !cancelled() }}
-        # A pull_request run from a fork gets a read-only token whatever the
-        # permissions block says, so commenting fails there. The job summary is
-        # still written, and CI should not go red over a missing comment.
-        continue-on-error: true
+        if: ${{ steps.coverage.outcome == 'success' }}
+        # A pull request from a fork gets a read-only token whatever the block
+        # above says, so commenting cannot work there and the run should not go
+        # red over it. Anything else failing here is real and should be seen,
+        # which a blanket continue-on-error would hide.
+        continue-on-error: ${{ github.event.pull_request.head.repo.fork }}
         uses: davelosert/vitest-coverage-report-action@8b157684c6a6b259b97d45e72b44242865c0f6a5 # v2.12.2
