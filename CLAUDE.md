@@ -24,15 +24,18 @@ This is a remote Model Context Protocol (MCP) server that integrates Zendesk API
 
 ## Development Commands
 
+This project uses pnpm, pinned via the `packageManager` field in `package.json`. Use `pnpm run <script>` rather than the bare `pnpm <script>` shorthand, because some script names (`deploy` among them) collide with pnpm's own built-in commands.
+
 ### Local Development
 ```bash
-npm run dev          # Start local development server (localhost:8788)
-npm run type-check   # Run TypeScript type checking
+pnpm install             # Install dependencies
+pnpm run dev             # Start local development server (localhost:8788)
+pnpm run type-check      # Run TypeScript type checking
 ```
 
 ### Deployment
 ```bash
-npm run deploy       # Deploy to Cloudflare Workers
+pnpm run deploy      # Deploy to Cloudflare Workers
 ```
 
 ### Environment Setup
@@ -59,7 +62,7 @@ ZENDESK_API_TOKEN=your_token
 
 #### KV Namespace Setup
 ```bash
-wrangler kv:namespace create "OAUTH_KV"
+pnpm wrangler kv namespace create "OAUTH_KV"
 # Update wrangler.jsonc with the returned KV ID
 ```
 
@@ -86,7 +89,7 @@ The MCP server currently provides these Zendesk tools:
 
 ### Local Testing with MCP Inspector
 ```bash
-npx @modelcontextprotocol/inspector@latest
+pnpm dlx @modelcontextprotocol/inspector@latest
 # Connect to: http://localhost:8788/sse
 ```
 
