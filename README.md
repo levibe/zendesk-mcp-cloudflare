@@ -56,6 +56,8 @@ Create a [Google Cloud OAuth App](https://cloud.google.com/iam/docs/workforce-ma
 - Authorization callback URL: `https://zendesk-mcp.<your-subdomain>.workers.dev/callback`
 - Note your Client ID and generate a Client secret
 
+If you put the worker behind a custom domain, register that hostname here too. The worker builds its callback from whichever host the request arrived on, so connecting through `https://zendesk.example.com/mcp` sends Google a redirect URI of `https://zendesk.example.com/callback`. Registering only the `workers.dev` hostname is easy to misdiagnose, because every endpoint on the worker keeps answering normally and the flow fails at the Google consent screen with `redirect_uri_mismatch`.
+
 #### For Local Development
 
 Create a separate OAuth App for development:
@@ -118,27 +120,75 @@ pnpm dlx @modelcontextprotocol/inspector
 
 The cooldown in `pnpm-workspace.yaml` applies here too, so this resolves to the newest inspector released more than a week ago rather than the absolute newest.
 
-- For production: Enter `https://zendesk-mcp.<your-subdomain>.workers.dev/sse`
-- For local: Enter `http://localhost:8788/sse`
+- For production: Enter `https://zendesk-mcp.<your-subdomain>.workers.dev/mcp`
+- For local: Enter `http://localhost:8788/mcp`
 
 Complete the authentication flow and you'll see all Zendesk tools available.
 
-## Claude Desktop Integration
+## Connecting a Claude Client
 
-Add to your Claude Desktop configuration file. Leave the command below as `npx`, not `pnpm dlx`: it runs on your own machine when Claude Desktop starts the server, where Node ships `npx` but pnpm may not be installed at all.
+There are two routes in, and they behave differently enough that the choice matters. Prefer the connector unless something rules it out.
+
+### As a custom connector
+
+Claude holds remote MCP servers on your account rather than in a file on disk, so there is nothing to install and no Node runtime on the machine. Each person adds it once themselves, and it asks for a display name as well as the URL:
+
+```
+Name   Momentum Zendesk
+URL    https://zendesk-mcp.<your-subdomain>.workers.dev/mcp
+```
+
+Inside Claude Desktop that is **Settings → Connectors → Add custom connector**, which `Cmd+,` opens directly. At claude.ai it sits under **Customize → Connectors** instead, behind the **+** button.
+
+An Owner on Team or Enterprise can instead enable the connector for the whole organization, under **Organization settings → Connectors**. That saves everyone adding it, but it does not sign anyone in — each member still authorizes individually the first time they use it, unless the organization has configured managed authentication.
+
+Either way the connector follows the account rather than the machine, so it appears in Claude Desktop and at claude.ai both, and `claude_desktop_config.json` is not involved at all.
+
+Use `/mcp` rather than `/sse`. `src/index.ts` mounts both, and `/sse` is the superseded transport kept for older clients — hand a current client `/sse` and it will POST there, take a 404, and fall back.
+
+Anthropic's infrastructure makes this connection rather than the user's machine, so the worker has to be reachable over the public internet, which a deployed worker already is. That is also the property that makes this route viable for people who will never open a terminal: nothing runs locally, so there is nothing local to go wrong. `HOSTED_DOMAIN` still governs who may sign in, so a connector does not widen access.
+
+### Through the `mcp-remote` proxy
+
+Servers listed in `claude_desktop_config.json` are started as local programs and spoken to over stdin and stdout, so reaching an HTTP server needs a local adapter in between. Use this only for clients that cannot take a connector.
+
+Open the file with **Settings → Developer → Edit Config**, or edit it directly:
+
+- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`, which expands to `C:\Users\<you>\AppData\Roaming\Claude\claude_desktop_config.json`
+
+The file usually already holds your app preferences, so add `mcpServers` alongside the keys that are there rather than replacing the whole thing. Leave the command as `npx` and not `pnpm dlx`: it runs on the user's own machine, where Node ships `npx` but pnpm may not be installed at all. The `-y` matters, because `npx` asks to confirm before installing a package it does not have yet and there is no terminal for anyone to answer in.
 
 ```json
 {
 	"mcpServers": {
 		"zendesk": {
 			"command": "npx",
-			"args": ["mcp-remote", "https://zendesk-mcp.<your-subdomain>.workers.dev/sse"]
+			"args": [
+				"-y",
+				"mcp-remote",
+				"https://zendesk-mcp.<your-subdomain>.workers.dev/mcp",
+				"--auth-timeout",
+				"120"
+			]
 		}
 	}
 }
 ```
 
-After restarting Claude Desktop, authenticate via the browser flow. You can then ask Claude to:
+Claude Desktop reads this file only at launch, so quit it fully and start it again — closing the window leaves it running in the background and changes nothing. On macOS press Cmd+Q, and on Windows right-click the tray icon and choose Quit. To point at a local server instead, run `pnpm run dev` and use `http://localhost:8788/mcp`.
+
+This route asks a lot more of the machine, and the failures are worth knowing before handing it to anyone:
+
+- **Node has to be installed.** `npx` is not present on a machine without Node, which rules this out for most non-technical users on its own.
+- **Two timers run against first-time sign-in, and both are short.** `mcp-remote` waits 30 seconds for the OAuth callback unless `--auth-timeout` says otherwise, and Claude Desktop separately cancels a server that has not finished initializing within 60 seconds. Picking a Google account can outlast either. The symptom is a browser landing on `localhost:<port>` with nothing listening, because the proxy was gone before the redirect came back. Retrying usually works, since the second attempt reuses the approval cookie and the Google session — which is exactly why this is easy to dismiss as a fluke.
+- **An idle stream gets dropped.** Node's fetch abandons a response body after 300 seconds of silence, so a quiet SSE connection dies with `Body Timeout Error` and the proxy reconnects underneath you. Reconnecting can re-enter the auth path and open a browser window unprompted.
+- **Windows cannot find `npx`.** Claude Desktop spawns the command without a shell, so the `.cmd` shim never resolves. Use `"command": "cmd"` with `"args": ["/c", "npx", "mcp-remote", "<your-url>"]`.
+- **Tokens are cached on disk.** They live in `~/.mcp-auth` on macOS and `%USERPROFILE%\.mcp-auth` on Windows. Delete that folder if authentication gets stuck after a URL change. A stale lockfile there needs no attention, since the proxy detects and clears it.
+
+### Either way
+
+Authenticate through the browser flow when prompted, then ask Claude to:
 
 - "Show me the latest support tickets"
 - "Create a new ticket for a customer issue"
