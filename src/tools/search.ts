@@ -27,13 +27,13 @@ export const searchTools: ToolDefinition[] = [
       page?: number;
     }) => {
 			const { query, type, ...searchParams } = params
-			
+
 			// Build the search query with type filter if specified
 			let searchQuery = query
 			if (type) {
 				searchQuery = `type:${type} ${query}`
 			}
-			
+
 			return executeSearchWithStandardizedResponse(
 				() => client.search(searchQuery, searchParams),
 				type || 'mixed'

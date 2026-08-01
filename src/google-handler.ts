@@ -10,7 +10,21 @@ import {
 const app = new Hono<{ Bindings: Env & { OAUTH_PROVIDER: OAuthHelpers } }>()
 
 app.get('/authorize', async (c) => {
-	const oauthReqInfo = await c.env.OAUTH_PROVIDER.parseAuthRequest(c.req.raw)
+	// parseAuthRequest rejects an unregistered client, a redirect URI that doesn't match
+	// the registration, and dangerous redirect schemes. It signals all of these by throwing,
+	// so without this catch they surface as a bare 500 that tells the client nothing.
+	//
+	// The caller is still unauthenticated here, so it gets a fixed message and the provider's
+	// own text goes to the log instead. Those messages are static strings today, but relaying
+	// a dependency's error verbatim only stays safe until a release adds detail to one.
+	let oauthReqInfo: AuthRequest
+	try {
+		oauthReqInfo = await c.env.OAUTH_PROVIDER.parseAuthRequest(c.req.raw)
+	} catch (error) {
+		console.warn('parseAuthRequest rejected the request:', error instanceof Error ? error.message : String(error))
+		return c.text('Invalid authorization request', 400)
+	}
+
 	const { clientId } = oauthReqInfo
 	if (!clientId) {
 		return c.text('Invalid request', 400)

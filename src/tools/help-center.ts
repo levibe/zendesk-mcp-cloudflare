@@ -5,7 +5,7 @@
 import { z } from 'zod'
 import type { ZendeskClient } from '../zendesk-client'
 import type { ToolDefinition } from '../types/zendesk'
-import { paginationSchema, sortingSchema, idSchema, nameSchema, descriptionSchema } from '../types/zendesk'
+import { paginationSchema, sortingSchema, idSchema } from '../types/zendesk'
 import { createTool } from '../utils/tool-registry'
 import { executeSearchWithStandardizedResponse } from '../utils/search-response'
 
@@ -199,14 +199,14 @@ export const helpCenterTools: ToolDefinition[] = [
 
 						const sectionsWithArticles = params.include_articles
 							? await Promise.all(
-									sections.map(async (section: any) => {
-										const articlesResponse = await client.listArticlesBySection(section.id)
-										return {
-											...section,
-											articles: articlesResponse.articles || []
-										}
-									})
-								)
+								sections.map(async (section: any) => {
+									const articlesResponse = await client.listArticlesBySection(section.id)
+									return {
+										...section,
+										articles: articlesResponse.articles || []
+									}
+								})
+							)
 							: sections
 
 						return {

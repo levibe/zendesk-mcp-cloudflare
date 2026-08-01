@@ -72,14 +72,14 @@ export const organizationsTools: ToolDefinition[] = [
 			per_page?: number;
 		}) => {
 			const { query } = params
-			
+
 			// Build the search query with filters
 			let searchQuery = `type:organization ${query}`
-			
+
 			if (params.domain) searchQuery += ` domain:${params.domain}`
 			if (params.created_after) searchQuery += ` created>${params.created_after}`
 			if (params.created_before) searchQuery += ` created<${params.created_before}`
-			
+
 			return executeSearchWithStandardizedResponse(
 				() => client.search(searchQuery, {
 					sort_by: params.sort_by,

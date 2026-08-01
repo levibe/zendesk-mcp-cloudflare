@@ -1,6 +1,10 @@
 /**
  * Centralized export of all Zendesk MCP tools
  * Provides organized tool categories for easy registration
+ *
+ * Defining a tool here does not publish it. Registration currently withholds every
+ * tool that writes to Zendesk, so the create/update/delete tools below are compiled
+ * and tested but never offered to a client. See isReadOnlyTool in utils/tool-registry.
  */
 
 import { ticketsTools } from './tickets'
