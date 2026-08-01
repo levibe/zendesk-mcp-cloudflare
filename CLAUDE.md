@@ -141,7 +141,7 @@ Cover a private method through the public one that calls it, rather than casting
 
 Teardown of spies and stubbed globals belongs in `vitest.config.ts` (`restoreMocks`, `unstubGlobals`), not in a per-file `afterEach`. Both run _before_ each test, so a mock created at module scope would be torn down before the first test ran — create them inside a test or a `beforeEach`. Fake timers have no equivalent switch and still need `vi.useRealTimers()` in an `afterEach`.
 
-Some tests deliberately pin behaviour that looks unintended, so that changing it has to be a decision rather than an accident. Each says so in a comment and names the issue holding the argument. If you fix one of those behaviours, expect to invert its test — that is the pin doing its job, not a regression.
+Some tests deliberately pin behaviour that looks unintended, so that changing it has to be a decision rather than an accident. Each says so in a comment, and names the issue holding the argument where one has been filed. If you fix one of those behaviours, expect to invert its test — that is the pin doing its job, not a regression.
 
 ### Local Testing with MCP Inspector
 
@@ -186,6 +186,7 @@ To add new Zendesk tools:
 
 ## Development Notes
 
+- `request` throws `ZendeskRequestError`, carrying the HTTP status when the server answered and leaving it undefined when the request never completed. Classify a failure on that status, or on an error's `name` or `code` down the `cause` chain — never by matching the message, which is built out of the Zendesk response body and so cannot tell a status from the same digits quoted inside a body
 - Uses `fetch` API instead of `axios` for Cloudflare Workers compatibility
 - All environment variables are accessed via `this.env` in the Workers context
 - Error handling returns `isError: true` for failed operations
