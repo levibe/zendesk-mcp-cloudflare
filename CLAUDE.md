@@ -78,6 +78,8 @@ Set these via `pnpm exec wrangler secret put <SECRET_NAME>`:
 - `ZENDESK_API_TOKEN` - Zendesk API token
 - `HOSTED_DOMAIN` - (Optional) Restrict to specific Google domain
 
+Everything above is a secret, including `ZENDESK_SUBDOMAIN` and `ZENDESK_EMAIL`, which are not sensitive. Set new deployment config the same way rather than as a dashboard var, because a var does not survive: Workers Builds deploys the production branch with `wrangler deploy`, which honours `keep_vars`, but builds every other branch with `wrangler versions upload`, which takes no equivalent and clears plain vars while leaving encrypted ones alone. So a var lasts until the next pull request, and then fails as missing credentials at request time, pointing nowhere near the deploy that removed it.
+
 #### Local Development Setup
 
 Create `.dev.vars` file:
