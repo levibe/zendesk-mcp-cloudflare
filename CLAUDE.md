@@ -124,7 +124,14 @@ Vitest, with no runtime of its own. Everything under test is either pure or reac
 ```bash
 pnpm run test            # Run the suite once (what validate and CI use)
 pnpm run test:watch      # Re-run on change while working
+pnpm run test:coverage   # Run once and report coverage (text plus coverage/index.html)
 ```
+
+Coverage measures all of `src/`, not only the files a test imported, so a module nobody covers sits in the table at 0% instead of being absent from it. The report is there to show where the holes are, which means the untested tools and the vendored OAuth code belong in the denominator.
+
+Read `coverage/index.html` rather than the terminal table when you want the full picture. The text reporter omits files that are at 100% on all four metrics, and `coverage.skipFull` does not change that, so a directory can print a middling percentage with its finished files nowhere in sight.
+
+Nothing gates on a coverage threshold. The number is a map of what is untested, not a target to move — `validate` and CI run `test`, not `test:coverage`.
 
 Tests sit next to the code they cover as `*.test.ts`, which is why `pnpm run lint` and `tsc --noEmit` already reach them without a second path to configure. `wrangler deploy --dry-run` bundles from `src/index.ts` and follows imports, so nothing imports a test file and none of this ships.
 
