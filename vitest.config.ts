@@ -14,12 +14,21 @@ export default defineConfig({
 		unstubGlobals: true,
 		coverage: {
 			provider: 'v8',
-			// The text table is a summary, not the whole picture: it omits files that are at
-			// 100% on all four metrics, so a directory can print a middling percentage with
-			// its finished files nowhere in the listing. `coverage.skipFull` does not switch
-			// that off — it reads the same either way in 4.1.10. The html report has every
-			// file, so open that before concluding something is uncovered.
-			reporter: ['text', 'html'],
+			// text and html are for reading locally. The text table is a summary, not the
+			// whole picture: it omits files that are at 100% on all four metrics, so a
+			// directory can print a middling percentage with its finished files nowhere in
+			// the listing. `coverage.skipFull` does not switch that off — it reads the same
+			// either way in 4.1.10. The html report has every file, so open that before
+			// concluding something is uncovered.
+			//
+			// The two json reporters exist for CI rather than for people. The reporting
+			// action requires json-summary for the totals, and reads json for the per-file
+			// detail it puts in the pull request comment.
+			reporter: ['text', 'html', 'json-summary', 'json'],
+			// Write the reports even when the run fails. A failing suite is exactly when the
+			// comment on the pull request has something to say, and without this the run
+			// goes red having produced nothing to explain itself.
+			reportOnFailure: true,
 			// Report on all of src/, not just the files a test happened to import. Without
 			// this, a module nobody tests is absent from the table rather than sitting in it
 			// at 0% — which reads as "nothing to see here" for exactly the files that need

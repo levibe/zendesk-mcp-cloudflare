@@ -5,6 +5,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { executeSearchWithStandardizedResponse, standardizeSearchResponse } from './search-response'
+import { ZendeskRequestError } from '../zendesk-client'
 
 const apiUrl = (path: string) => `https://example.zendesk.com/api/v2${path}`
 
@@ -186,6 +187,17 @@ describe('executeSearchWithStandardizedResponse', () => {
 		expect(response.metadata.error).toBe('Zendesk request failed: it broke')
 		expect(response.metadata.errorType).toBe('Error')
 		expect(response.metadata.errorCause).toBe('Zendesk API Error: 503 - upstream unavailable')
+	})
+
+	// errorType comes from the error's constructor name, so what a real failing search reports
+	// is whatever the client threw — a ZendeskRequestError, not the bare Error the tests above
+	// hand-build. Pinned here so the suite documents the type clients actually receive.
+	it('names the client error type a real failure would arrive with', async () => {
+		const response = await executeSearchWithStandardizedResponse(async () => {
+			throw new ZendeskRequestError('Zendesk request failed: Zendesk API Error: 503 - down', 503)
+		})
+
+		expect(response.metadata.errorType).toBe('ZendeskRequestError')
 	})
 
 	it('answers a failure with an empty, explicitly unpaginated response', async () => {

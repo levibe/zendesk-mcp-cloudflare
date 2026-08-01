@@ -19,6 +19,71 @@ interface ZendeskClientConfig {
  */
 type ZendeskEnv = Pick<Env, 'ZENDESK_SUBDOMAIN' | 'ZENDESK_EMAIL' | 'ZENDESK_API_TOKEN'>
 
+/**
+ * What `request` throws. `status` is the HTTP status when the server answered and undefined
+ * when it did not, which is the distinction the retry policy turns on: a status means Zendesk
+ * replied and said no, no status means the request never completed.
+ *
+ * It exists so that the status survives being turned into a sentence. `request` builds its
+ * message out of the response body, and the classifier used to search that message for '429'
+ * and friends — which cannot tell a status from the same three digits quoted in a body.
+ */
+export class ZendeskRequestError extends Error {
+	constructor(
+		message: string,
+		readonly status?: number,
+		options?: ErrorOptions
+	) {
+		super(message, options)
+		this.name = 'ZendeskRequestError'
+	}
+}
+
+/**
+ * Statuses where Zendesk is asking to be called back rather than refusing the request.
+ *
+ * 408 is in because it means the request timed out on their side and is worth sending again.
+ * The old classifier retried it only when the body happened to contain the word "timeout",
+ * so an empty-bodied 408 was dropped — the inconsistency is the bug, not the retry.
+ *
+ * 500 is out, for the opposite reason: it is a fault that will fail the same way on a second
+ * attempt. 502, 503 and 504 mean the request never reached a healthy backend at all.
+ */
+const RETRYABLE_STATUSES = new Set([408, 429, 502, 503, 504])
+
+/**
+ * Error names fetch uses when the request never produced a response. `AbortError` is what the
+ * 30 second timeout below raises; `TimeoutError` is what `AbortSignal.timeout` would raise if
+ * this ever moves to it.
+ */
+const RETRYABLE_ERROR_NAMES = new Set(['AbortError', 'TimeoutError'])
+
+/**
+ * Socket-level failures, which arrive as a `code` rather than as a distinct error name.
+ *
+ * `code` is a Node convention, so this branch fires under Vitest and would fire on Node, but
+ * not on workerd, where a dropped connection comes back as a plain `Error` reading "Network
+ * connection lost." with no code to match on. Those go unretried, which is what they did
+ * before this file stopped matching message text as well — the old substring list looked for
+ * `econnreset`, and workerd's wording contains nothing of the sort. See #29.
+ */
+const RETRYABLE_ERROR_CODES = new Set(['ECONNRESET', 'ETIMEDOUT', 'ECONNREFUSED'])
+
+/**
+ * Yields an error and then each `cause` beneath it. `request` rewraps whatever it caught, so
+ * the failure worth classifying is usually a link or two down rather than in hand — and fetch
+ * itself nests, reporting a socket error as the cause of a bare "fetch failed".
+ *
+ * The depth cap is only there so a self-referential chain cannot hang the retry loop.
+ */
+function* causeChain(error: unknown, maxDepth = 10): Generator<Error> {
+	let current = error
+	for (let depth = 0; depth < maxDepth && current instanceof Error; depth += 1) {
+		yield current
+		current = current.cause
+	}
+}
+
 export class ZendeskClient {
 	private subdomain: string
 	private email: string
@@ -145,7 +210,10 @@ export class ZendeskClient {
 
 				if (!response.ok) {
 					const errorText = await response.text()
-					throw new Error(`Zendesk API Error: ${response.status} - ${errorText}`)
+					throw new ZendeskRequestError(
+						`Zendesk API Error: ${response.status} - ${errorText}`,
+						response.status
+					)
 				}
 
 				// Handle empty responses (e.g., from DELETE requests)
@@ -159,9 +227,15 @@ export class ZendeskClient {
 				clearTimeout(timeoutId)
 			}
 		} catch (error) {
-			// Re-throw with more context, preserving original error chain for debugging
+			// Re-throw with more context, preserving original error chain for debugging.
+			// The status is carried onto the new error rather than left behind in the message,
+			// so a caller holding what request threw can read it without walking `cause`.
 			if (error instanceof Error) {
-				throw new Error(`Zendesk request failed: ${error.message}`, { cause: error })
+				throw new ZendeskRequestError(
+					`Zendesk request failed: ${error.message}`,
+					error instanceof ZendeskRequestError ? error.status : undefined,
+					{ cause: error }
+				)
 			}
 			throw error
 		}
@@ -169,29 +243,35 @@ export class ZendeskClient {
 
 	/**
 	 * Check if an error is retryable (transient failure)
+	 *
+	 * Classification reads the status and the error's identity, never the message text. The
+	 * message is built out of the Zendesk response body, so matching on it cannot tell a 502
+	 * that happened from a 502 the body merely quotes.
 	 */
 	private isRetryableError(error: unknown): boolean {
 		if (!(error instanceof Error)) {
 			return false
 		}
 
-		// Check for AbortError from timeout (thrown by AbortController)
-		if (error.name === 'AbortError') {
-			return true
+		for (const link of causeChain(error)) {
+			// A status means Zendesk answered. Retry only the ones that mean "ask again";
+			// anything else it refused will be refused just as firmly on a second attempt.
+			if (link instanceof ZendeskRequestError && link.status !== undefined) {
+				return RETRYABLE_STATUSES.has(link.status)
+			}
+
+			// No status yet: this link may still be a timeout, or a connection that failed
+			// underneath fetch and was reported as the cause of a bare "fetch failed".
+			if (RETRYABLE_ERROR_NAMES.has(link.name)) {
+				return true
+			}
+			const { code } = link as { code?: unknown }
+			if (typeof code === 'string' && RETRYABLE_ERROR_CODES.has(code)) {
+				return true
+			}
 		}
 
-		const message = error.message.toLowerCase()
-
-		// Retry on rate limiting, server errors, and timeouts
-		return (
-			message.includes('429') || // Rate limit
-			message.includes('502') || // Bad gateway
-			message.includes('503') || // Service unavailable
-			message.includes('504') || // Gateway timeout
-			message.includes('timeout') || // Timeout errors
-			message.includes('econnreset') || // Connection reset
-			message.includes('etimedout') // Connection timed out
-		)
+		return false
 	}
 
 	/**
