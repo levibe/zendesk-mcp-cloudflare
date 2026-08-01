@@ -275,8 +275,9 @@ describe('the 30 second timeout', () => {
 			(_url, init) =>
 				new Promise<Response>((_resolve, reject) => {
 					init.signal.addEventListener('abort', () => {
-						const aborted = new Error('The operation was aborted.')
-						aborted.name = 'AbortError'
+						// Both Node and workerd reject with a DOMException, not a renamed Error. That it
+						// is an Error at all is what lets causeChain walk to it, so pin the real type.
+						const aborted = new DOMException('The operation was aborted.', 'AbortError')
 						reject(aborted)
 					})
 				})
@@ -327,7 +328,10 @@ describe('the 30 second timeout', () => {
 })
 
 describe('requestWithRetry', () => {
-	it.each([429, 502, 503, 504])(
+	// 408 is here because it means the request timed out on Zendesk's side. The old classifier
+	// retried it only when the response body happened to contain the word "timeout", so an
+	// empty-bodied 408 was dropped — this makes it the same answer either way.
+	it.each([408, 429, 502, 503, 504])(
 		'retries a %i and gives up after three attempts',
 		async (status) => {
 			const fetchMock = stubFetch(async () => failedResponse(status, 'transient'))
@@ -407,8 +411,9 @@ describe('requestWithRetry', () => {
 			(_url, init) =>
 				new Promise<Response>((_resolve, reject) => {
 					init.signal.addEventListener('abort', () => {
-						const aborted = new Error('The operation was aborted.')
-						aborted.name = 'AbortError'
+						// Both Node and workerd reject with a DOMException, not a renamed Error. That it
+						// is an Error at all is what lets causeChain walk to it, so pin the real type.
+						const aborted = new DOMException('The operation was aborted.', 'AbortError')
 						reject(aborted)
 					})
 				})

@@ -37,8 +37,17 @@ export class ZendeskRequestError extends Error {
 	}
 }
 
-/** Statuses where Zendesk is asking to be called back rather than refusing the request. */
-const RETRYABLE_STATUSES = new Set([429, 502, 503, 504])
+/**
+ * Statuses where Zendesk is asking to be called back rather than refusing the request.
+ *
+ * 408 is in because it means the request timed out on their side and is worth sending again.
+ * The old classifier retried it only when the body happened to contain the word "timeout",
+ * so an empty-bodied 408 was dropped — the inconsistency is the bug, not the retry.
+ *
+ * 500 is out, for the opposite reason: it is a fault that will fail the same way on a second
+ * attempt. 502, 503 and 504 mean the request never reached a healthy backend at all.
+ */
+const RETRYABLE_STATUSES = new Set([408, 429, 502, 503, 504])
 
 /**
  * Error names fetch uses when the request never produced a response. `AbortError` is what the
@@ -47,7 +56,15 @@ const RETRYABLE_STATUSES = new Set([429, 502, 503, 504])
  */
 const RETRYABLE_ERROR_NAMES = new Set(['AbortError', 'TimeoutError'])
 
-/** Socket-level failures, which arrive as a `code` rather than as a distinct error name. */
+/**
+ * Socket-level failures, which arrive as a `code` rather than as a distinct error name.
+ *
+ * `code` is a Node convention, so this branch fires under Vitest and would fire on Node, but
+ * not on workerd, where a dropped connection comes back as a plain `Error` reading "Network
+ * connection lost." with no code to match on. Those go unretried, which is what they did
+ * before this file stopped matching message text as well — the old substring list looked for
+ * `econnreset`, and workerd's wording contains nothing of the sort. See #29.
+ */
 const RETRYABLE_ERROR_CODES = new Set(['ECONNRESET', 'ETIMEDOUT', 'ECONNREFUSED'])
 
 /**
