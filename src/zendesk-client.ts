@@ -211,12 +211,10 @@ export class ZendeskClient {
 			this.subdomain = this.sanitizeSubdomain(this.subdomain)
 		}
 
-		// Warned rather than thrown so a test can build a client without credentials.
-		if (!this.subdomain || !this.email || !this.apiToken) {
-			console.warn(
-				'Zendesk credentials not found. Please set ZENDESK_SUBDOMAIN, ZENDESK_EMAIL, and ZENDESK_API_TOKEN.'
-			)
-		}
+		// Nothing warns about a missing credential here. `request` throws on one before it sends
+		// anything, and that throw reaches the caller where a log line never does. A warning at
+		// this point would also fire on every tool call, since #40 made the server stateless and
+		// a fresh client is built per request.
 	}
 
 	/** The subdomain reaches a hostname, so anything outside `[a-zA-Z0-9-_]` is dropped. */
@@ -228,11 +226,28 @@ export class ZendeskClient {
 		return sanitized
 	}
 
-	/** Strips path traversal, so an id reaching the path cannot climb out of the API root. */
-	private sanitizeEndpoint(endpoint: string): string {
-		const sanitized = endpoint.replace(/\.\./g, '').replace(/\/\//g, '/')
-		return sanitized.startsWith('/') ? sanitized : `/${sanitized}`
-	}
+	// There is no endpoint sanitizer here, and its absence is a decision rather than a gap.
+	//
+	// Nothing could reach one. Every endpoint in this file is either a fixed literal like
+	// `/tickets.json` or a template holding an id that `validateId` has already proved to be a
+	// positive integer, and no tool handler passes an endpoint at all. Do not add one back on
+	// the strength of the 0.1.0 changelog listing the old one under "Security": that listing is
+	// the part that did real damage, because a control nobody can reach still costs every reader
+	// of this request path the time it takes to work out that it defends nothing.
+	//
+	// What would change that is an endpoint whose shape a caller decides — a tool taking a path
+	// fragment, or a method interpolating a string where an id goes today. The answer then is
+	// to keep the caller's value out of the path, by validating it into something known or
+	// sending it as a query parameter, rather than to reinstate a filter that has to guess what
+	// will be tried against it.
+	//
+	// The place a model-supplied string does become syntax is elsewhere, and is still open:
+	// every `search_*` tool concatenates free text into a Zendesk search expression —
+	// `type:ticket ${query}` in src/tools/tickets.ts, and the same pattern in users.ts,
+	// organizations.ts and help-center.ts — so a query of `foo type:user` changes what is being
+	// searched. That is left alone knowingly, because it crosses no privilege boundary: one
+	// shared service account, reads only. It is named here because it is where to look if you
+	// arrived expecting the sanitizers to be the protection.
 
 	private validateId(id: number): number {
 		if (!Number.isInteger(id) || id <= 0) {
@@ -273,9 +288,10 @@ export class ZendeskClient {
 			throw new Error('Zendesk credentials not configured. Please set environment variables.')
 		}
 
-		const sanitizedEndpoint = this.sanitizeEndpoint(endpoint)
-
-		const url = new URL(`${this.getBaseUrl()}${sanitizedEndpoint}`)
+		// The endpoint goes out exactly as the calling method wrote it. The note above
+		// `validateId` says why nothing rewrites it, and what would have to change for that
+		// to stop being safe.
+		const url = new URL(`${this.getBaseUrl()}${endpoint}`)
 
 		if (params) {
 			Object.entries(params).forEach(([key, value]) => {
@@ -824,23 +840,9 @@ export class ZendeskClient {
 		return this.send('GET', `/help_center/categories/${id}.json`)
 	}
 
-	/* DISABLED FOR SECURITY - create_category method
-	async createCategory (data: any) {
-		return this.send('POST', '/help_center/categories.json', { category: data })
-	}
-	*/
-
-	/* DISABLED FOR SECURITY - update_category method
-	async updateCategory (id: number, data: any) {
-		return this.send('PUT', `/help_center/categories/${id}.json`, { category: data })
-	}
-	*/
-
-	/* DISABLED FOR SECURITY - delete_category method
-	async deleteCategory (id: number) {
-		return this.send('DELETE', `/help_center/categories/${id}.json`)
-	}
-	*/
+	// Nothing here creates, updates or deletes a category or a section. Six commented-out
+	// methods used to say so under a "DISABLED FOR SECURITY" label, which read as though the
+	// comment were the control; the allowlists in src/utils/tool-registry.ts are.
 
 	// Sections
 	async listSections(params?: Record<string, unknown>) {
@@ -851,24 +853,6 @@ export class ZendeskClient {
 		this.validateId(id)
 		return this.send('GET', `/help_center/sections/${id}.json`)
 	}
-
-	/* DISABLED FOR SECURITY - create_section method
-	async createSection (data: any, categoryId: number) {
-		return this.send('POST', `/help_center/categories/${categoryId}/sections.json`, { section: data })
-	}
-	*/
-
-	/* DISABLED FOR SECURITY - update_section method
-	async updateSection (id: number, data: any) {
-		return this.send('PUT', `/help_center/sections/${id}.json`, { section: data })
-	}
-	*/
-
-	/* DISABLED FOR SECURITY - delete_section method
-	async deleteSection (id: number) {
-		return this.send('DELETE', `/help_center/sections/${id}.json`)
-	}
-	*/
 
 	async listSectionsByCategory(categoryId: number, params?: Record<string, unknown>) {
 		this.validateId(categoryId)

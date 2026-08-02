@@ -17,17 +17,20 @@ describe('withErrorHandling', () => {
 		})
 	})
 
-	it('pretty-prints anything else as JSON', async () => {
+	// The expected text is spelled out rather than built with `JSON.stringify`, because calling
+	// the same function the code calls would agree with it however it was indented. This is the
+	// test that holds the response compact, so it has to name the bytes.
+	it('renders anything else as JSON, with no indentation', async () => {
 		const handler = withErrorHandling(async () => ({ ticket: { id: 42 } }))
 
-		expect(textOf(await handler())).toBe(JSON.stringify({ ticket: { id: 42 } }, null, 2))
+		expect(textOf(await handler())).toBe('{"ticket":{"id":42}}')
 	})
 
 	it('puts the success message above the JSON, separated by a blank line', async () => {
 		const handler = withErrorHandling(async () => ({ id: 42 }), 'Ticket created successfully!')
 
 		expect(textOf(await handler())).toBe(
-			`Ticket created successfully!\n\n${JSON.stringify({ id: 42 }, null, 2)}`
+			`Ticket created successfully!\n\n${JSON.stringify({ id: 42 })}`
 		)
 	})
 
@@ -95,9 +98,9 @@ describe('withErrorHandling', () => {
 	})
 
 	// What #28 was actually about. A handler that built its own response used to be wrapped a
-	// second time here, and this is what the client got: the inner response pretty-printed as
-	// text, with the `isError` that said the write failed encoded inside it rather than set on
-	// the response. Nothing downstream could tell the failure from a success.
+	// second time here, and this is what the client got: the inner response serialised as the
+	// text of the outer one, with the `isError` that said the write failed encoded inside it
+	// rather than set on the response. Nothing downstream could tell the failure from a success.
 	it('encodes a response handed to it as text, losing the isError on it', async () => {
 		const alreadyShaped = {
 			content: [{ type: 'text' as const, text: 'Error: 422 - RecordInvalid' }],
@@ -108,6 +111,6 @@ describe('withErrorHandling', () => {
 		const response = await handler()
 
 		expect(response.isError).toBeUndefined()
-		expect(textOf(response)).toBe(JSON.stringify(alreadyShaped, null, 2))
+		expect(textOf(response)).toBe(JSON.stringify(alreadyShaped))
 	})
 })

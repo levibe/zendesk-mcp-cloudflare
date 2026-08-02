@@ -17,8 +17,10 @@
  *
  * Which metrics each module pins, and why:
  *
- * - The three utils are wholly covered, so they pin all four. Any drop is a
- *   regression rather than a rounding artefact.
+ * - Two of the utils and the OAuth handler are wholly covered, so they pin all
+ *   four. Any drop is a regression rather than a rounding artefact. The search
+ *   response helper is the exception: it pins the other three at 100 and holds
+ *   branches lower, because its reshaping has arms no fixture has reached yet.
  * - The client and the hierarchy walk pin branches alone. Their statement counts
  *   are held down by a long tail of thin methods, so a floor there would move
  *   whenever a method was added rather than when a decision stopped being
@@ -52,4 +54,19 @@ export const coverageThresholds = {
 	// a test had reached by name. Measured 92 at the time.
 	'src/zendesk-client.ts': { branches: 90 },
 	'src/tools/help-center.ts': { branches: 75 },
+	// From nothing at all, with the first tests this file has ever had — its three routes, the
+	// Google exchange and the consent URL it builds.
+	//
+	// It pins 100 on branches, which it could not do while the "what did this throw" ternary was
+	// written out at each of five catch sites: `atob`, `JSON.parse` and `btoa` all throw real
+	// Errors, so four of those five pairs had an arm nothing could reach. Behind one `reasonFor`
+	// helper there is a single pair, and the provider stub throwing a bare string covers it. Do
+	// not read the 100 as every path being exercised — see the note on POST /authorize, where
+	// the module mock makes coverage report a guarded and an unguarded route identically.
+	'src/google-handler.ts': {
+		statements: 100,
+		branches: 100,
+		functions: 100,
+		lines: 100,
+	},
 }
