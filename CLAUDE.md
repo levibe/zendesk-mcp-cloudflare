@@ -223,6 +223,7 @@ A write tool also has to keep its hands off the response. Handlers return the cl
 
 - `request` throws `ZendeskRequestError`, carrying the HTTP status when the server answered and leaving it undefined when the request never completed. Classify a failure on that status, or on an error's `name` or `code` down the `cause` chain — never by matching the message, which is built out of the Zendesk response body and so cannot tell a status from the same digits quoted inside a body
 - Uses `fetch` API instead of `axios` for Cloudflare Workers compatibility
+- Redirects are not followed. `request` sets `redirect: 'manual'` and turns a 3xx into a failure that names where it pointed, because the platform strips `Authorization` on a hop to another host and the follow-up request comes back 401 reading exactly like a revoked token. Do not set this back to `follow`. Do not re-attach the credential and follow the redirect by hand either — doing so decides the new host is trustworthy, which is precisely the judgement the platform default exists to stop `fetch` making unprompted
 - Environment variables arrive as the `env` argument to `fetch` and are threaded from there. There is no `this.env`, because there is no longer a class to hang it on
 - Error handling returns `isError: true` for failed operations
 - TypeScript is used throughout for type safety
