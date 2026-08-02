@@ -240,6 +240,25 @@ describe('get_help_center_hierarchy', () => {
 			expect(result.categories_returned).toBe(0)
 			expect(result.sections_returned).toBe(0)
 		})
+
+		// The old walk chose between getCategory and listCategories on the truthiness of
+		// category_id, so a caller asking for category 0 was silently handed the entire Help
+		// Center instead. It now asks whether the parameter was given at all, so 0 is treated as
+		// the request it was — and the real client refuses it, because validateId rejects
+		// anything that is not a positive integer. That throw belongs to ZendeskClient and is
+		// tested there; what this pins is the routing decision, which is the part that lives here
+		// and the part that silently did the wrong thing.
+		it('asks for category 0 rather than walking every category', async () => {
+			const client = stubClient({
+				getCategory: {},
+				sectionsByCategory: {},
+			})
+
+			await walk(client, { category_id: 0 })
+
+			expect(client.getCategory).toHaveBeenCalledWith(0)
+			expect(client.listCategories).not.toHaveBeenCalled()
+		})
 	})
 
 	describe('bodies it cannot read', () => {
@@ -390,6 +409,42 @@ describe('get_help_center_hierarchy', () => {
 
 			expect(client.listSectionsByCategory).toHaveBeenCalledTimes(MAX_REQUESTS - 1)
 			expect(result.truncated).toBe(true)
+		})
+
+		// A next_page that is present but not a URL we could follow leaves the walk unable to say
+		// whether it holds the whole list. Reading that as "last page" is the one way left for
+		// this tool to claim a completeness it never established, which is the thing the whole
+		// change exists to stop — so it reports truncation instead. Zendesk sends a URL or null
+		// and nothing else, so these shapes are about what the walk is entitled to claim rather
+		// than a body anyone has had back.
+		it.each([
+			['an empty string', ''],
+			['a number', 2],
+			['a boolean', true],
+			['an object', { page: 2 }],
+		])('reports truncation when next_page is %s', async (_label, nextPage) => {
+			const client = stubClient({
+				listCategories: { categories: [{ id: 1 }], next_page: nextPage },
+				sectionsByCategory: { 1: { sections: [] } },
+			})
+
+			const result = await walk(client)
+
+			// One page read, and no attempt to follow something it could not parse.
+			expect(client.listCategories).toHaveBeenCalledTimes(1)
+			expect(result.categories_returned).toBe(1)
+			expect(result.truncated).toBe(true)
+		})
+
+		it('treats an absent next_page as the last page rather than as unreadable', async () => {
+			const client = stubClient({
+				listCategories: { categories: [{ id: 1 }] },
+				sectionsByCategory: { 1: { sections: [] } },
+			})
+
+			const result = await walk(client)
+
+			expect(result.truncated).toBe(false)
 		})
 
 		it('still returns the part of the tree it did reach', async () => {

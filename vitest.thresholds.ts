@@ -51,5 +51,5 @@ export const coverageThresholds = {
 	// Raised from 85 with #54, which drives every method on the client rather than the handful
 	// a test had reached by name. Measured 92 at the time.
 	'src/zendesk-client.ts': { branches: 90 },
-	'src/tools/help-center.ts': { branches: 82 },
+	'src/tools/help-center.ts': { branches: 85 },
 }

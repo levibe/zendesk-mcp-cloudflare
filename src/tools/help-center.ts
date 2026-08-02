@@ -111,9 +111,28 @@ const spend = (budget: Budget): boolean => {
  * Zendesk sets `next_page` to the URL of the page after this one, and to `null` on the last.
  * That field is the only thing that can tell the walk it is holding part of a list, so it is
  * where `truncated` ultimately comes from.
+ *
+ * Three answers rather than two, because "there is no next page" and "I cannot tell whether
+ * there is one" are different facts and only one of them earns a complete result. A field that
+ * is present but not a URL we could follow — a number, an object, an empty string — is the
+ * second. Zendesk does not send that today, so this is about what the walk is entitled to
+ * claim rather than a shape anyone has seen: the whole point of this tool reporting truncation
+ * is that it stops asserting completeness it did not establish, and reading an unusable value
+ * as `null` would put one such assertion back.
  */
-const hasMorePages = (response: unknown): boolean =>
-	isRecord(response) && typeof response.next_page === 'string' && response.next_page.length > 0
+type PageCursor = 'more' | 'last' | 'unreadable'
+
+const nextPageOf = (response: unknown): PageCursor => {
+	if (!isRecord(response) || response.next_page === null || response.next_page === undefined) {
+		return 'last'
+	}
+
+	if (typeof response.next_page === 'string') {
+		return response.next_page.length > 0 ? 'more' : 'unreadable'
+	}
+
+	return 'unreadable'
+}
 
 /**
  * Reads a paged list under `key` until Zendesk says there is no more, the page limit is
@@ -132,7 +151,12 @@ const collectPages = async (
 		const response = await fetchPage(page)
 		entities.push(...readEntities(response, key))
 
-		if (!hasMorePages(response)) return entities
+		const cursor = nextPageOf(response)
+		if (cursor === 'last') return entities
+		if (cursor === 'unreadable') {
+			budget.truncated = true
+			return entities
+		}
 	}
 
 	budget.truncated = true
