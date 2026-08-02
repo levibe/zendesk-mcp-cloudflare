@@ -299,7 +299,15 @@ app.get('/callback', async (c) => {
 			userId: id,
 		}))
 	} catch (error) {
-		console.warn('completeAuthorization rejected the request:', reasonFor(error))
+		// Error rather than warn, and the only catch in this file at that level. Adding it is what
+		// took a provider outage from an uncaught 500 to a 400, so anything alerting on 5xx went
+		// quiet at the same moment; the level is what is left to notice one by.
+		//
+		// The two catches on /authorize stay at warn deliberately, even though they absorb
+		// infrastructure failures too. Both are reachable by anyone with no sign-in at all, so
+		// raising them would let a stream of forged requests bury the outages this is meant to
+		// surface. Reaching here costs a completed Google sign-in, which bounds that.
+		console.error('completeAuthorization rejected the request:', reasonFor(error))
 		return c.text('Invalid authorization request', 400)
 	}
 

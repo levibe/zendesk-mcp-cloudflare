@@ -234,12 +234,12 @@ describe('GET /callback', () => {
 		// Same split as the two catches above it: the caller is unauthenticated, so the provider's
 		// own wording goes to the log and the response stays a fixed string.
 		it('logs the provider reason without relaying it to the caller', async () => {
-			const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+			const error = vi.spyOn(console, 'error').mockImplementation(() => {})
 			completeAuthorization.mockRejectedValue(new Error('Client not found: no-such-client'))
 
 			const response = await callback({ state: validState, code: 'google-code' })
 
-			expect(warn).toHaveBeenCalledWith(
+			expect(error).toHaveBeenCalledWith(
 				'completeAuthorization rejected the request:',
 				'Client not found: no-such-client'
 			)
@@ -249,12 +249,12 @@ describe('GET /callback', () => {
 		// The String(error) arm of the ternary. Reachable here, unlike the decode catch above,
 		// because what throws is a stub rather than atob or JSON.parse.
 		it('logs a thrown non-Error as a string', async () => {
-			const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+			const error = vi.spyOn(console, 'error').mockImplementation(() => {})
 			completeAuthorization.mockRejectedValue('a bare string')
 
 			const response = await callback({ state: validState, code: 'google-code' })
 
-			expect(warn).toHaveBeenCalledWith(
+			expect(error).toHaveBeenCalledWith(
 				'completeAuthorization rejected the request:',
 				'a bare string'
 			)
