@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import type { ToolDefinition } from '../types/zendesk'
-import { sortingSchema } from '../types/zendesk'
+import { paginationSchema, sortingSchema } from '../types/zendesk'
 import { createTool } from '../utils/tool-registry'
 import { executeSearchWithStandardizedResponse } from '../utils/search-response'
 
@@ -15,7 +15,11 @@ export const searchTools: ToolDefinition[] = [
 				.optional()
 				.describe('Filter results by object type'),
 			...sortingSchema,
-			page: z.number().optional().describe('Page number for pagination (default: 1)'),
+			// Spread rather than declared here. This tool used to carry its own `page` and no
+			// `per_page` at all, which meant the one tool named `search` was the one search tool
+			// that took neither the shared bounds nor a page size — so `page: 0` and `page: 2.7`
+			// travelled to Zendesk unexamined while every sibling refused them.
+			...paginationSchema,
 		},
 		async (client, params) => {
 			const { query, type, ...searchParams } = params

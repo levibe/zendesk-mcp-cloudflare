@@ -1,7 +1,8 @@
 /**
- * The client's three sanitizers and its retry policy all sit on the path from a tool
- * argument to an outbound request, so these drive them the way a tool does — through the
- * public methods, against a stubbed fetch — rather than reaching past `private`.
+ * The two checks the client makes on its inputs — the subdomain it sanitizes and the ids it
+ * validates — and its retry policy all sit on the path from a tool argument to an outbound
+ * request, so these drive them the way a tool does: through the public methods, against a
+ * stubbed fetch, rather than reaching past `private`.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -97,7 +98,7 @@ beforeEach(() => {
 	// Fake timers throughout: it keeps the 30s abort from ever firing on its own, and lets
 	// the retry tests assert on the backoff instead of waiting three real seconds.
 	vi.useFakeTimers()
-	// The constructor warns about missing credentials and each retry warns about the wait.
+	// Sanitizing a subdomain warns, and so does each retry before it waits.
 	vi.spyOn(console, 'warn').mockImplementation(() => {})
 	client = new ZendeskClient(credentials)
 })
@@ -161,34 +162,27 @@ describe('the subdomain', () => {
 	})
 })
 
+/**
+ * There used to be a sanitizer rewriting this path, and five tests here describing what it
+ * rewrote. It is gone, so what is left to pin is the property that made it pointless: the path
+ * an API method writes is the path that goes out, and the only part of it a caller can move is
+ * an id that `validateId` has already checked.
+ *
+ * One test rather than none, because reinstating a rewriting step would be invisible otherwise.
+ * Every endpoint in the client is already well formed, so a filter added back would leave all
+ * of them untouched and nothing else in this file would notice.
+ */
 describe('the endpoint path', () => {
-	const pathOf = async (endpoint: string) => {
+	it('is sent exactly as the calling method wrote it', async () => {
 		const fetchMock = stubFetch(async () => jsonResponse({}))
-		await client.request('GET', endpoint)
-		return new URL(urlOf(fetchMock)).pathname
-	}
 
-	it('is left alone when it is already well formed', async () => {
-		expect(await pathOf('/tickets.json')).toBe('/api/v2/tickets.json')
-	})
+		// A doubled slash, which no method in the client would ever write. It is here because
+		// the old sanitizer would have collapsed it, so this is the assertion that fails if
+		// one is put back — a well-formed path would survive a filter unchanged and prove
+		// nothing.
+		await client.request('GET', '/tickets//42.json')
 
-	it('gains a leading slash when it is missing one', async () => {
-		expect(await pathOf('tickets.json')).toBe('/api/v2/tickets.json')
-	})
-
-	it('collapses a doubled slash', async () => {
-		expect(await pathOf('/tickets//1.json')).toBe('/api/v2/tickets/1.json')
-	})
-
-	// Both replacements are a single pass, so removing the two `..` leaves three slashes and
-	// the collapse only closes one of them. The traversal is gone either way — the request
-	// stays under /api/v2 — but the surviving `//` is why this asserts the exact path.
-	it('cannot climb out of /api/v2', async () => {
-		expect(await pathOf('/../../admin.json')).toBe('/api/v2//admin.json')
-	})
-
-	it('strips a relative segment from an endpoint with no leading slash', async () => {
-		expect(await pathOf('../secrets.json')).toBe('/api/v2/secrets.json')
+		expect(new URL(urlOf(fetchMock)).pathname).toBe('/api/v2/tickets//42.json')
 	})
 })
 
@@ -829,7 +823,6 @@ describe('which methods retry', () => {
 		'requestWithRetry',
 		'send',
 		'sanitizeSubdomain',
-		'sanitizeEndpoint',
 		'validateId',
 		'getBaseUrl',
 		'getAuthHeader',

@@ -178,7 +178,7 @@ describe('registerTools', () => {
 		register(server, [tool])
 
 		expect(textOf(await handlerRegisteredBy(server)())).toBe(
-			`Macro created successfully!\n\n${JSON.stringify(created, null, 2)}`
+			`Macro created successfully!\n\n${JSON.stringify(created)}`
 		)
 	})
 

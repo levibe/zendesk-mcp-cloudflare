@@ -29,7 +29,13 @@ export const withErrorHandling =
 			// makes the check below look like dead code to anyone reading the types rather than
 			// this comment. The overload telling the truth is the one taking a value that may not
 			// be representable, and this is that case.
-			const body: string | undefined = JSON.stringify(result, null, 2)
+			// No indent argument, and that is a decision rather than an omission. The reader on
+			// the other end of this text is a model, so two spaces a level buys legibility for
+			// nobody and spends context on whitespace — a listing of a hundred nested tickets
+			// pays for it many times over. Do not put `null, 2` back to make a response easier to
+			// eyeball while debugging; read it through `jq` at the point you are debugging, and
+			// leave what ships compact.
+			const body: string | undefined = JSON.stringify(result)
 			const text = [successMessage, body].filter((part) => part !== undefined).join('\n\n')
 
 			return {
