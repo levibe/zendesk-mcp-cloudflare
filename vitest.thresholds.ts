@@ -17,7 +17,7 @@
  *
  * Which metrics each module pins, and why:
  *
- * - The two utils are wholly covered, so they pin all four. Any drop is a
+ * - The three utils are wholly covered, so they pin all four. Any drop is a
  *   regression rather than a rounding artefact.
  * - The client and the hierarchy walk pin branches alone. Their statement counts
  *   are held down by a long tail of thin methods, so a floor there would move
@@ -39,6 +39,12 @@ export const coverageThresholds = {
 	'src/utils/search-response.ts': {
 		statements: 100,
 		branches: 85,
+		functions: 100,
+		lines: 100,
+	},
+	'src/utils/support-response.ts': {
+		statements: 100,
+		branches: 100,
 		functions: 100,
 		lines: 100,
 	},

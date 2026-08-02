@@ -151,6 +151,26 @@ export const updateMacroSchema = {
 export type MacroCreatePayload = InferParams<typeof createMacroSchema>
 export type MacroUpdatePayload = InferParams<typeof updateMacroSchema>
 
+/**
+ * What `support_info` answers with.
+ *
+ * Every field is nullable because the whole point of the tool is to be called when something
+ * is wrong, and a response that came back malformed should still say what it could read
+ * rather than throwing on the way to reporting a problem.
+ */
+export interface SupportInfo {
+	/** The host Zendesk actually answered from, which is what proves the subdomain is right. */
+	account: string | null
+	user: {
+		id: number | null
+		name: string | null
+		email: string | null
+		role: string | null
+		active: boolean | null
+		suspended: boolean | null
+	}
+}
+
 // Search Response Types
 export interface SearchResponseMetadata {
 	total_count?: number
