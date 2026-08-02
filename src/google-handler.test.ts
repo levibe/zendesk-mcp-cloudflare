@@ -205,11 +205,10 @@ describe('GET /callback', () => {
 	// completeAuthorization is the last place a forged state can still reach, and it is the only
 	// thing that validates the rest of it — the clientId check up front is the whole of what
 	// happens before here. It validates by throwing: an unregistered client, a missing
-	// redirectUri, or a redirect URI the client never registered each raise, and a state with no
-	// scope raises a TypeError when the provider joins it. Those checks are the ones that matter
-	// and they hold, so there is no open redirect. What was wrong is that nothing caught them, so
-	// the answer was a bare 500 that anyone could produce at will once they had signed in with
-	// Google — which is the property the state guard at the top of this route exists to remove.
+	// redirectUri, and a redirect URI the client never registered each raise. Those checks are
+	// the ones that matter and they hold, so there is no open redirect. What was wrong is that
+	// nothing caught them, so the answer was a bare 500 that anyone could produce at will once
+	// they had signed in with Google — which is the property this guard exists to remove.
 	describe('a state the provider rejects', () => {
 		beforeEach(() => {
 			vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -532,6 +531,45 @@ describe('/authorize', () => {
 				)
 				await expect(response.text()).resolves.not.toContain('base64')
 			})
+		})
+
+		// btoa refuses any code point above U+00FF, and redirectToGoogle is where a caller's own
+		// text reaches it. This is the cheapest 500 in the file to reach: one form field, no
+		// sign-in, no cookie, no registered client.
+		//
+		// The character has to sit somewhere other than clientId. parseRedirectApproval requires
+		// a truthy clientId and base64s it into the approval cookie, so a non-Latin-1 one would
+		// throw there instead and never reach the mint site — which is exactly why this went
+		// unnoticed: every check in front of it looks like it should have caught it.
+		it('answers 400 when the approval cannot be encoded as state', async () => {
+			const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+			vi.mocked(parseRedirectApproval).mockResolvedValue({
+				state: { oauthReqInfo: { ...authRequest, state: 'Ā' } },
+				headers: {},
+			})
+
+			const response = await approve()
+
+			expect(response.status).toBe(400)
+			await expect(response.text()).resolves.toBe('Invalid request')
+			expect(warn).toHaveBeenCalledWith(
+				'The authorization request could not be encoded as state:',
+				expect.stringMatching(/./)
+			)
+		})
+
+		// The same object with the character removed still goes through, so the guard above is
+		// refusing the encoding rather than the shape.
+		it('still redirects when the same approval is encodable', async () => {
+			vi.mocked(parseRedirectApproval).mockResolvedValue({
+				state: { oauthReqInfo: { ...authRequest, state: 'A' } },
+				headers: {},
+			})
+
+			const response = await approve()
+
+			expect(response.status).toBe(302)
+			expect(googleUrl(response).hostname).toBe('accounts.google.com')
 		})
 
 		// The headers parseRedirectApproval hands back are the approval cookie, which is the whole

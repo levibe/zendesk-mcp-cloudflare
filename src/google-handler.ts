@@ -57,6 +57,12 @@ app.post('/authorize', async (c) => {
 	// `clientId` makes `parseRedirectApproval` throw, and an unhandled throw is answered by Hono
 	// as a bare 500.
 	//
+	// Not only forged input lands here, and the 400 is a deliberate simplification rather than a
+	// claim. `parseRedirectApproval` calls `importKey`, which throws when COOKIE_ENCRYPTION_KEY
+	// is missing — a misconfigured deployment, reported to the caller as their mistake. The log
+	// line carries the real reason, so nothing is lost, but do not read this catch as proof that
+	// a 400 from this route means the request was bad.
+	//
 	// Worth knowing when reading coverage on this file: it reports every statement here as
 	// covered, because the tests replace `parseRedirectApproval` with a stub that resolves. A
 	// green number is not evidence this route is guarded — the test that proves it is the one
@@ -85,6 +91,33 @@ async function redirectToGoogle(
 	oauthReqInfo: AuthRequest,
 	headers: Record<string, string> = {}
 ) {
+	// `btoa` refuses any code point above U+00FF, and this is the one place a caller's own text
+	// reaches it. On POST /authorize the object below comes straight out of the form body, and
+	// nothing upstream inspects it beyond requiring a truthy `clientId`.
+	//
+	// It slips past every check in front of it, which is why it is worth naming rather than
+	// leaving to be rediscovered. A JSON `Ā` escape is pure ASCII on the wire, so the
+	// caller's own base64 is valid and `decodeState` parses it into a string holding a real
+	// U+0100. The approval cookie carries only the clientId, so keeping that ASCII and putting
+	// the character in any other field clears that too. Then this line throws, and an uncaught
+	// throw here is a bare 500 anyone can produce with one form field and no sign-in at all.
+	//
+	// Caught at the mint site rather than fixed at the root, deliberately. Making the encoding
+	// UTF-8 safe is the better answer, but this `btoa` is one half of a pair — what it writes is
+	// read back in /callback, and `renderApprovalDialog` and `parseRedirectApproval` are a second
+	// pair in the vendored file — so the two halves have to move together or a state minted
+	// before the change stops decoding after it. That is worth doing on its own, not in passing.
+	let state: string
+	try {
+		state = btoa(JSON.stringify(oauthReqInfo))
+	} catch (error) {
+		console.warn(
+			'The authorization request could not be encoded as state:',
+			error instanceof Error ? error.message : String(error)
+		)
+		return c.text('Invalid request', 400)
+	}
+
 	return new Response(null, {
 		headers: {
 			...headers,
@@ -93,7 +126,7 @@ async function redirectToGoogle(
 				hostedDomain: c.env.HOSTED_DOMAIN,
 				redirectUri: new URL('/callback', c.req.raw.url).href,
 				scope: 'email profile',
-				state: btoa(JSON.stringify(oauthReqInfo)),
+				state,
 				upstreamUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
 			}),
 		},
@@ -248,8 +281,10 @@ app.get('/callback', async (c) => {
 	// Do not add `scope` to the list of things the provider refuses. `options.scope.join(' ')`
 	// runs only on the implicit-grant branch, and every client here uses `responseType: 'code'`,
 	// where scope is written onto the grant unexamined and an absent one simply drops the key.
-	// An earlier draft of this comment claimed the opposite and was describing validation that
-	// does not happen on the path this server actually takes.
+	//
+	// The same caveat as the catch on POST /authorize: this is not only forged input. The
+	// provider reads and writes KV throughout, so an outage answers 400 here and shows up as a
+	// 4xx spike rather than a 5xx one. The reason reaches the log either way.
 	let redirectTo: string
 	try {
 		;({ redirectTo } = await c.env.OAUTH_PROVIDER.completeAuthorization({
