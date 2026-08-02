@@ -243,6 +243,20 @@ describe('request', () => {
 		await expect(failure).rejects.toHaveProperty('status', 429)
 	})
 
+	it('carries the status even when the body it answered with will not parse', async () => {
+		stubFetch(
+			async () =>
+				new Response('<html>maintenance</html>', {
+					headers: { 'content-type': 'application/json' },
+				})
+		)
+
+		const failure = client.request('GET', '/tickets.json')
+
+		await expect(failure).rejects.toThrow('Zendesk answered 200 with a body that is not valid JSON')
+		await expect(failure).rejects.toHaveProperty('status', 200)
+	})
+
 	it('leaves the status unset when the request never got an answer', async () => {
 		stubFetch(async () => {
 			throw new TypeError('fetch failed')
@@ -345,32 +359,84 @@ describe('requestWithRetry', () => {
 		}
 	)
 
-	// fetch reports a socket failure as a bare "fetch failed" with the real error as its
-	// cause, so the code that identifies it is a link down the chain rather than in hand.
-	it.each(['ECONNRESET', 'ETIMEDOUT', 'ECONNREFUSED'])(
-		'retries a connection that failed with %s',
-		async (code) => {
-			const fetchMock = stubFetch(async () => {
-				throw new TypeError('fetch failed', {
-					cause: Object.assign(new Error(`read ${code}`), { code }),
-				})
-			})
-
-			const attempt = client.requestWithRetry('GET', '/tickets.json')
-			const rejects = expect(attempt).rejects.toThrow('fetch failed')
-			await drainBackoff()
-			await rejects
-
-			expect(fetchMock).toHaveBeenCalledTimes(3)
-		}
-	)
-
-	it('does not retry a connection error with no code to go on', async () => {
+	/**
+	 * The shapes a failed connection actually arrives in. They differ by runtime and share
+	 * nothing worth matching on, which is the whole of #29.
+	 *
+	 * The first two are undici's, as Node and Vitest produce them — a bare "fetch failed" with
+	 * the real socket error as its cause, carrying the `code` the old classifier looked for.
+	 * The rest were probed against workerd, which is what actually serves production: an
+	 * unreachable port is a plain `Error` reading "Network connection lost." with no `code` at
+	 * all, and a host that will not resolve is an opaque reference id. None of the last three
+	 * matched anything the old rule knew about, so all three went unretried where it counted.
+	 *
+	 * What they do share is that no response came back, and that is now what is asked.
+	 */
+	it.each([
+		[
+			'undici reporting a reset socket',
+			() =>
+				new TypeError('fetch failed', {
+					cause: Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }),
+				}),
+		],
+		[
+			'undici reporting a refused connection',
+			() =>
+				new TypeError('fetch failed', {
+					cause: Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }),
+				}),
+		],
+		['workerd losing the connection', () => new Error('Network connection lost.')],
+		[
+			'workerd failing to resolve the host',
+			() => new Error('internal error; reference = lfgpejlogahfrh23do9e5eib'),
+		],
+		// This one inverted with #29, and the inversion is the point. It used to assert a
+		// single attempt, on the grounds that there was no code to go on — which describes
+		// every dropped connection workerd will ever report.
+		['a bare fetch failure with nothing beneath it', () => new TypeError('fetch failed')],
+	])('retries %s', async (_label, makeError) => {
 		const fetchMock = stubFetch(async () => {
-			throw new TypeError('fetch failed')
+			throw makeError()
 		})
 
-		await expect(client.requestWithRetry('GET', '/tickets.json')).rejects.toThrow('fetch failed')
+		const attempt = client.requestWithRetry('GET', '/tickets.json')
+		const rejects = expect(attempt).rejects.toThrow('Zendesk request failed')
+		await drainBackoff()
+		await rejects
+
+		expect(fetchMock).toHaveBeenCalledTimes(3)
+	})
+
+	// A missing credential also produces no status, so it would be indistinguishable from a
+	// lost connection if `request` still wrapped it. It is thrown before the try for exactly
+	// this reason: three seconds of backoff cannot conjure a token that was never set.
+	it('does not retry a missing credential', async () => {
+		const fetchMock = stubFetch(async () => jsonResponse({}))
+		const unconfigured = new ZendeskClient({ ...credentials, apiToken: '' })
+
+		await expect(unconfigured.requestWithRetry('GET', '/tickets.json')).rejects.toThrow(
+			'Zendesk credentials not configured'
+		)
+
+		expect(fetchMock).not.toHaveBeenCalled()
+	})
+
+	// Zendesk answered, so this is not a request that failed to complete. The status is put on
+	// the error to say so — without it, the rule above would send the request a second time,
+	// re-asking for something that already arrived because its body would not parse.
+	it('does not retry a body that will not parse', async () => {
+		const fetchMock = stubFetch(
+			async () =>
+				new Response('<html>maintenance</html>', {
+					headers: { 'content-type': 'application/json' },
+				})
+		)
+
+		await expect(client.requestWithRetry('GET', '/tickets.json')).rejects.toThrow(
+			'Zendesk answered 200 with a body that is not valid JSON'
+		)
 
 		expect(fetchMock).toHaveBeenCalledTimes(1)
 	})

@@ -52,24 +52,6 @@ export class ZendeskRequestError extends Error {
 const RETRYABLE_STATUSES = new Set([408, 429, 502, 503, 504])
 
 /**
- * Error names fetch uses when the request never produced a response. `AbortError` is what the
- * 30 second timeout below raises; `TimeoutError` is what `AbortSignal.timeout` would raise if
- * this ever moves to it.
- */
-const RETRYABLE_ERROR_NAMES = new Set(['AbortError', 'TimeoutError'])
-
-/**
- * Socket-level failures, which arrive as a `code` rather than as a distinct error name.
- *
- * `code` is a Node convention, so this branch fires under Vitest and would fire on Node, but
- * not on workerd, where a dropped connection comes back as a plain `Error` reading "Network
- * connection lost." with no code to match on. Those go unretried, which is what they did
- * before this file stopped matching message text as well — the old substring list looked for
- * `econnreset`, and workerd's wording contains nothing of the sort. See #29.
- */
-const RETRYABLE_ERROR_CODES = new Set(['ECONNRESET', 'ETIMEDOUT', 'ECONNREFUSED'])
-
-/**
  * Yields an error and then each `cause` beneath it. `request` rewraps whatever it caught, so
  * the failure worth classifying is usually a link or two down rather than in hand — and fetch
  * itself nests, reporting a socket error as the cause of a bare "fetch failed".
@@ -163,12 +145,16 @@ export class ZendeskClient {
 		data?: unknown,
 		params?: Record<string, unknown>
 	): Promise<unknown> {
-		try {
-			// Validate credentials before making requests
-			if (!this.subdomain || !this.email || !this.apiToken) {
-				throw new Error('Zendesk credentials not configured. Please set environment variables.')
-			}
+		// Above the try on purpose. Everything inside it is rewrapped as a ZendeskRequestError,
+		// and one of those carrying no status is how the retry policy recognises a request that
+		// never got an answer — which is worth sending again. A missing credential is not that.
+		// It will be just as missing on the third attempt, so leaving this inside would buy
+		// three seconds of backoff and the identical failure.
+		if (!this.subdomain || !this.email || !this.apiToken) {
+			throw new Error('Zendesk credentials not configured. Please set environment variables.')
+		}
 
+		try {
 			// Sanitize endpoint to prevent path traversal attacks
 			const sanitizedEndpoint = this.sanitizeEndpoint(endpoint)
 
@@ -225,7 +211,20 @@ export class ZendeskClient {
 				// Handle empty responses (e.g., from DELETE requests)
 				const contentType = response.headers.get('content-type')
 				if (contentType && contentType.includes('application/json')) {
-					return await response.json()
+					try {
+						return await response.json()
+					} catch (cause) {
+						// Carrying the status matters more than it looks. Zendesk answered, so
+						// this is not a request that failed to complete — and without a status
+						// the retry policy would read it as exactly that and ask again, re-sending
+						// something that already arrived on the strength of a body we could not
+						// parse. 200 is not in the retryable set, so it fails once and says why.
+						throw new ZendeskRequestError(
+							`Zendesk answered ${response.status} with a body that is not valid JSON`,
+							response.status,
+							{ cause }
+						)
+					}
 				} else {
 					return { success: true }
 				}
@@ -253,6 +252,19 @@ export class ZendeskClient {
 	 * Classification reads the status and the error's identity, never the message text. The
 	 * message is built out of the Zendesk response body, so matching on it cannot tell a 502
 	 * that happened from a 502 the body merely quotes.
+	 *
+	 * The rule asks two questions in order: did this come from `request` at all, and if so did
+	 * Zendesk answer it. A ZendeskRequestError means a request was actually sent, and a status
+	 * on it means an answer came back. No status therefore means the request went out and
+	 * nothing returned, which is worth sending again whatever the underlying cause was.
+	 *
+	 * Written that way because the previous version matched specifics that do not exist on the
+	 * runtime this deploys to. It looked for a `code` of ECONNRESET and friends, which is a
+	 * Node convention — true of undici under Vitest, false of workerd. Probed against the real
+	 * runtime before this was changed: an unreachable port gives a plain `Error` reading
+	 * "Network connection lost." with no `code` at all, and a host that will not resolve gives
+	 * "internal error; reference = <opaque id>". There is no name, code or wording worth keying
+	 * on, and asking whether a response arrived makes the rule independent of all three.
 	 */
 	private isRetryableError(error: unknown): boolean {
 		if (!(error instanceof Error)) {
@@ -260,23 +272,18 @@ export class ZendeskClient {
 		}
 
 		for (const link of causeChain(error)) {
-			// A status means Zendesk answered. Retry only the ones that mean "ask again";
-			// anything else it refused will be refused just as firmly on a second attempt.
-			if (link instanceof ZendeskRequestError && link.status !== undefined) {
-				return RETRYABLE_STATUSES.has(link.status)
-			}
-
-			// No status yet: this link may still be a timeout, or a connection that failed
-			// underneath fetch and was reported as the cause of a bare "fetch failed".
-			if (RETRYABLE_ERROR_NAMES.has(link.name)) {
-				return true
-			}
-			const { code } = link as { code?: unknown }
-			if (typeof code === 'string' && RETRYABLE_ERROR_CODES.has(code)) {
+			if (link instanceof ZendeskRequestError) {
+				// A status means Zendesk answered. Retry only the ones that mean "ask again";
+				// anything else it refused will be refused just as firmly on a second attempt.
+				if (link.status !== undefined) {
+					return RETRYABLE_STATUSES.has(link.status)
+				}
 				return true
 			}
 		}
 
+		// Nothing in the chain came from `request`, so no request was ever made. A missing
+		// credential or a malformed id fails here, and will fail identically next time.
 		return false
 	}
 
