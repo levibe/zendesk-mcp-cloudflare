@@ -130,10 +130,15 @@ export async function executeSearchWithStandardizedResponse(
 		// here it was never raising the flag at all. Do not reinstate the catch-and-resolve. An
 		// empty result list is an answer, and a search that failed does not have one.
 		//
-		// The original error goes back out untouched rather than rewrapped, because what
-		// classifies a failure downstream is the `status` a `ZendeskRequestError` carries and
-		// the `cause` holding what Zendesk actually said. `new Error(error.message)` would
-		// silently drop both.
+		// The original error goes back out untouched rather than rewrapped. Nothing between here
+		// and the client reads more than its message today — `withErrorHandling` takes
+		// `error.message` and nothing else, and `isRetryableError` has already run and finished,
+		// upstream inside `requestWithRetry`, long before the failure reaches this catch. So the
+		// reason is not that a consumer needs the `status` and the `cause`; it is that rewrapping
+		// would destroy them for no gain. `new Error(error.message)` costs a link in the chain
+		// and buys nothing, and the message it would build is one this function is in no position
+		// to improve on. Keeping the object whole is also what lets a test assert identity rather
+		// than wording, which is the assertion that survives someone editing the sentence.
 		throw error
 	}
 }

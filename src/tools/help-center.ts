@@ -119,11 +119,15 @@ const spend = (budget: Budget): boolean => {
  * claim rather than a shape anyone has seen: the whole point of this tool reporting truncation
  * is that it stops asserting completeness it did not establish, and reading an unusable value
  * as `null` would put one such assertion back.
+ *
+ * An absent `next_page` is `'last'` rather than `'unreadable'`, which is deliberate and pinned
+ * by a test. This only ever sees a response from a list endpoint — the single `getCategory` is
+ * fetched outside `collectPages` — and a list that fits on one page is entitled to omit it.
  */
 type PageCursor = 'more' | 'last' | 'unreadable'
 
-const nextPageOf = (response: unknown): PageCursor => {
-	if (!isRecord(response) || response.next_page === null || response.next_page === undefined) {
+const nextPageOf = (response: Record<string, unknown>): PageCursor => {
+	if (response.next_page === null || response.next_page === undefined) {
 		return 'last'
 	}
 
@@ -135,8 +139,9 @@ const nextPageOf = (response: unknown): PageCursor => {
 }
 
 /**
- * Reads a paged list under `key` until Zendesk says there is no more, the page limit is
- * reached, or the budget runs out — marking the walk truncated in either of the last two cases.
+ * Reads a paged list under `key` until Zendesk says there is no more, or until one of the three
+ * things that cut a walk short happens: the page limit, the budget running out, or a body it
+ * cannot read. All three of those mark the walk truncated; only the first case is complete.
  */
 const collectPages = async (
 	budget: Budget,
@@ -150,6 +155,20 @@ const collectPages = async (
 
 		const response = await fetchPage(page)
 		entities.push(...readEntities(response, key))
+
+		// A body earns "I cannot tell" two ways before its cursor is worth consulting: it is not
+		// an object at all, or it is one that does not carry the key this walk asked for. Neither
+		// is an empty list, which arrives as `{ categories: [], next_page: null }` with the key
+		// present — so this cannot turn an empty Help Center into a truncated one.
+		//
+		// `{ success: true }` is the shape to know about. `request` substitutes it for any 200
+		// whose content type is not JSON, so without this a non-JSON answer would be read as a
+		// list of nothing and reported as a complete, empty Help Center — which is the assertion
+		// this whole tool was changed to stop making.
+		if (!isRecord(response) || !(key in response)) {
+			budget.truncated = true
+			return entities
+		}
 
 		const cursor = nextPageOf(response)
 		if (cursor === 'last') return entities
@@ -187,14 +206,28 @@ const mapWithLimit = async <T, R>(items: T[], task: (item: T) => Promise<R>): Pr
 	return results
 }
 
-/** What the response says when it is handing back part of the Help Center rather than all of it. */
+/**
+ * What the response says when it is handing back part of the Help Center rather than all of it.
+ *
+ * Worded around the fact rather than the cause, because there are three causes and the note
+ * cannot tell which one fired without the budget carrying a reason it does not carry. Naming
+ * only the two limits was wrong once already: an unreadable page marker truncates after a
+ * single request, and a note claiming the walk had reached a forty-request ceiling would be
+ * describing something that plainly had not happened.
+ *
+ * The remedy has to be conditional for the same reason. Asking for a smaller slice answers the
+ * two limits and does nothing at all for an unreadable body — a narrower walk meets the same
+ * marker and stops in the same place, so a model told to narrow would keep narrowing forever.
+ */
 const TRUNCATION_NOTE =
-	'This result is incomplete. The walk stops after ' +
-	`${MAX_REQUESTS} requests, or ${MAX_PAGES_PER_LIST} pages of any one list, and it reached ` +
-	'one of those limits. Categories, sections or articles are missing, and every count here ' +
-	'describes only what came back rather than what exists. Ask again for a smaller slice to ' +
-	'get a complete answer: pass category_id to walk a single category, or leave ' +
-	'include_articles unset so the walk does not spend its requests on articles.'
+	'This result is incomplete, so every count here describes only what came back rather than ' +
+	'what exists, and categories, sections or articles are missing. A walk stops early for one ' +
+	`of three reasons: it reached its ceiling of ${MAX_REQUESTS} requests, one list ran past ` +
+	`${MAX_PAGES_PER_LIST} pages, or a page marker came back in a shape it could not follow. ` +
+	'The first two are answered by asking for a smaller slice — pass category_id to walk a ' +
+	'single category, or leave include_articles unset so the walk does not spend its requests ' +
+	'on articles. The third is not: a narrower walk meets the same marker and stops in the ' +
+	'same place, so retry rather than narrow.'
 
 export const helpCenterTools: ToolDefinition[] = [
 	createTool(

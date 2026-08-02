@@ -262,20 +262,30 @@ describe('get_help_center_hierarchy', () => {
 	})
 
 	describe('bodies it cannot read', () => {
+		// Each of these walks nothing, and — the part worth asserting — none of them calls that
+		// nothing a complete answer. A body with no readable list in it is the strongest case of
+		// "I cannot tell", so reporting truncated: false here would be the tool claiming the Help
+		// Center is empty on the strength of a response it could not read one field of.
 		it.each([
 			['null', null],
 			['undefined', undefined],
 			['a string', 'not a category list'],
-		])('walks nothing when the category body is %s', async (_label, body) => {
+			// What `request` substitutes for any 200 whose content type is not JSON. A record, so
+			// it clears isRecord, but it carries neither the key nor a cursor.
+			['the non-JSON placeholder', { success: true }],
+			['a record missing the categories key', { next_page: null }],
+		])('walks nothing and reports truncation when the category body is %s', async (_l, body) => {
 			const result = await walk(stubClient({ listCategories: body }))
 
 			expect(result.hierarchy).toEqual([])
 			expect(result.categories_returned).toBe(0)
+			expect(result.truncated).toBe(true)
+			expect(result.truncation_note).toContain('could not follow')
 		})
 
-		it('treats a section body it cannot read as no sections', async () => {
+		it('treats a section body it cannot read as no sections, and says the walk is partial', async () => {
 			const client = stubClient({
-				listCategories: { categories: [{ id: 1 }] },
+				listCategories: { categories: [{ id: 1 }], next_page: null },
 				sectionsByCategory: { 1: 'not a section list' },
 			})
 
@@ -283,6 +293,18 @@ describe('get_help_center_hierarchy', () => {
 
 			expect(result.hierarchy[0].sections).toEqual([])
 			expect(result.sections_returned).toBe(0)
+			expect(result.truncated).toBe(true)
+		})
+
+		// An empty list is a readable answer and has to stay one — it carries the key and a null
+		// cursor. If this ever goes red alongside the block above, the unreadable check has been
+		// widened until it swallows the ordinary empty case.
+		it('reports a genuinely empty list as complete', async () => {
+			const result = await walk(stubClient({ listCategories: { categories: [], next_page: null } }))
+
+			expect(result.categories_returned).toBe(0)
+			expect(result.truncated).toBe(false)
+			expect(result).not.toHaveProperty('truncation_note')
 		})
 	})
 
