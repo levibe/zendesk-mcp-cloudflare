@@ -103,9 +103,9 @@ export async function executeSearchWithStandardizedResponse(
 		const rawResponse = await searchOperation()
 		return standardizeSearchResponse(rawResponse, defaultResultType)
 	} catch (error) {
-		const duration = Date.now() - startTime
-
-		// Structured logging for Cloudflare Workers observability
+		// Structured logging for Cloudflare Workers observability. This is the only reason the
+		// catch exists — the log is a side effect on the way past, not a decision about what the
+		// caller gets back.
 		console.error('Search operation failed', {
 			error:
 				error instanceof Error
@@ -116,32 +116,24 @@ export async function executeSearchWithStandardizedResponse(
 						}
 					: String(error),
 			defaultResultType,
-			duration,
+			duration: Date.now() - startTime,
 			timestamp: new Date().toISOString(),
 		})
 
-		// Enhanced error response with detailed metadata for MCP clients
-		const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
-		const errorType = error instanceof Error ? error.constructor.name : 'UnknownError'
-
-		const errorMetadata: SearchResponseMetadata = {
-			error: errorMessage,
-			errorType,
-			duration,
-		}
-
-		// Include error cause chain if available
-		if (error instanceof Error && error.cause) {
-			errorMetadata.errorCause =
-				error.cause instanceof Error ? error.cause.message : String(error.cause)
-		}
-
-		return {
-			results: [],
-			metadata: errorMetadata,
-			count: 0,
-			next_page: null,
-			previous_page: null,
-		}
+		// Then rethrow, because the single `withErrorHandling` in `registerTools` is what sets
+		// `isError` on the response, and it can only see a rejection. This used to resolve with
+		// the failure described in `metadata.error` instead, which meant a revoked token, a 503
+		// and a dropped connection all reached the model looking exactly like a search that
+		// legitimately matched nothing — the difference sitting in a metadata field nothing
+		// obliges a model to read. That is #28's argument arriving on the read side: there the
+		// mistake was a handler wrapping its own response and burying `isError` inside JSON,
+		// here it was never raising the flag at all. Do not reinstate the catch-and-resolve. An
+		// empty result list is an answer, and a search that failed does not have one.
+		//
+		// The original error goes back out untouched rather than rewrapped, because what
+		// classifies a failure downstream is the `status` a `ZendeskRequestError` carries and
+		// the `cause` holding what Zendesk actually said. `new Error(error.message)` would
+		// silently drop both.
+		throw error
 	}
 }
