@@ -38,6 +38,140 @@ const readEntities = (response: unknown, key: string): HelpCenterEntity[] => {
 	return isHelpCenterEntity(value) ? [value] : []
 }
 
+/** A category with whatever sections the walk found beneath it. */
+type CategoryNode = HelpCenterEntity & { sections: HelpCenterEntity[] }
+
+/**
+ * Zendesk's maximum page size, and the reason `get_help_center_hierarchy` asks for a size at
+ * all. The default is 30 per page, and the walk used to send no pagination whatsoever — so on
+ * any Help Center bigger than that it read page one at each level and then reported those
+ * lengths as totals, with nothing in the answer to say they were not.
+ */
+const PAGE_SIZE = 100
+
+/**
+ * How many pages of a single list the walk will read. Five at 100 apiece is 500 categories, or
+ * 500 sections under one category, which is well past the point where handing the lot to a
+ * model is any use.
+ */
+const MAX_PAGES_PER_LIST = 5
+
+/**
+ * The ceiling on requests for one whole walk, across every level and every page.
+ *
+ * With `include_articles` the fan-out is 1 + C + (C x S), which on a real Help Center reaches a
+ * platform limit rather than an answer: Workers allows 50 subrequests per request on the Free
+ * plan, 1000 on the paid ones. Forty keeps a healthy walk inside the smaller of those with room
+ * to spare. It is not a guarantee under failure, because every GET is retried up to three times
+ * and one list call meeting a wall of 503s spends more than one subrequest — but that walk ends
+ * as a reported error, and an error is the outcome worth protecting. The jitter on the retry
+ * ladder is not the same protection and does not stand in for this one: it spreads the retries
+ * of a fan-out over time, where the problem here is how many first attempts the walk makes at
+ * all, which nothing had bounded.
+ *
+ * Reaching this ceiling is not an error either. It sets `truncated` on the response, which is
+ * the same thing the two page limits above do.
+ */
+const MAX_REQUESTS = 40
+
+/**
+ * How many of those requests may be in flight at once. Workers holds at most six connections
+ * open per request and queues whatever else is asked for, so the nested `Promise.all` this
+ * replaced never really issued a hundred requests in parallel — it built a queue nothing here
+ * could see or bound. Five leaves a connection spare, and it is also what makes the ceiling
+ * above mean anything, since a budget can only stop a walk that has not already asked for
+ * everything it wants.
+ */
+const MAX_IN_FLIGHT = 5
+
+/**
+ * What the walk may still ask for, and whether anything was left unread.
+ *
+ * One object threaded through every level rather than a limit per level, because truncation is
+ * a single fact about the answer: a caller needs to know the result is short, not which of the
+ * three ceilings above cut it short. Every request the walk makes is spent from here.
+ */
+interface Budget {
+	remaining: number
+	truncated: boolean
+}
+
+/** Takes one request from the budget, or records that there was none left to take. */
+const spend = (budget: Budget): boolean => {
+	if (budget.remaining <= 0) {
+		budget.truncated = true
+		return false
+	}
+
+	budget.remaining -= 1
+	return true
+}
+
+/**
+ * Zendesk sets `next_page` to the URL of the page after this one, and to `null` on the last.
+ * That field is the only thing that can tell the walk it is holding part of a list, so it is
+ * where `truncated` ultimately comes from.
+ */
+const hasMorePages = (response: unknown): boolean =>
+	isRecord(response) && typeof response.next_page === 'string' && response.next_page.length > 0
+
+/**
+ * Reads a paged list under `key` until Zendesk says there is no more, the page limit is
+ * reached, or the budget runs out — marking the walk truncated in either of the last two cases.
+ */
+const collectPages = async (
+	budget: Budget,
+	key: string,
+	fetchPage: (page: number) => Promise<unknown>
+): Promise<HelpCenterEntity[]> => {
+	const entities: HelpCenterEntity[] = []
+
+	for (let page = 1; page <= MAX_PAGES_PER_LIST; page += 1) {
+		if (!spend(budget)) return entities
+
+		const response = await fetchPage(page)
+		entities.push(...readEntities(response, key))
+
+		if (!hasMorePages(response)) return entities
+	}
+
+	budget.truncated = true
+	return entities
+}
+
+/**
+ * Runs `task` over every item, never more than `MAX_IN_FLIGHT` at a time, and answers in input
+ * order however the tasks happen to finish.
+ *
+ * A handful of workers pulling from one shared cursor, which is all this needs and is why it is
+ * written out here rather than taken from a dependency. `next` is read and advanced in the same
+ * synchronous step, so no two workers can ever claim the same item.
+ */
+const mapWithLimit = async <T, R>(items: T[], task: (item: T) => Promise<R>): Promise<R[]> => {
+	const results = new Array<R>(items.length)
+	let next = 0
+
+	const workers = Array.from({ length: Math.min(MAX_IN_FLIGHT, items.length) }, async () => {
+		while (next < items.length) {
+			const index = next
+			next += 1
+			results[index] = await task(items[index])
+		}
+	})
+
+	await Promise.all(workers)
+	return results
+}
+
+/** What the response says when it is handing back part of the Help Center rather than all of it. */
+const TRUNCATION_NOTE =
+	'This result is incomplete. The walk stops after ' +
+	`${MAX_REQUESTS} requests, or ${MAX_PAGES_PER_LIST} pages of any one list, and it reached ` +
+	'one of those limits. Categories, sections or articles are missing, and every count here ' +
+	'describes only what came back rather than what exists. Ask again for a smaller slice to ' +
+	'get a complete answer: pass category_id to walk a single category, or leave ' +
+	'include_articles unset so the walk does not spend its requests on articles.'
+
 export const helpCenterTools: ToolDefinition[] = [
 	createTool(
 		'list_articles',
@@ -176,7 +310,9 @@ export const helpCenterTools: ToolDefinition[] = [
 	// === HIERARCHY NAVIGATION TOOLS ===
 	createTool(
 		'get_help_center_hierarchy',
-		'Get the complete Help Center content hierarchy (categories > sections > articles)',
+		'Get the Help Center content hierarchy (categories > sections > articles). The walk is ' +
+			'bounded, so a large Help Center comes back partial with truncated set to true — pass ' +
+			'category_id to narrow it.',
 		{
 			include_articles: z
 				.boolean()
@@ -184,61 +320,82 @@ export const helpCenterTools: ToolDefinition[] = [
 				.describe('Include articles in the hierarchy (default: false)'),
 			category_id: z.number().optional().describe('Limit to specific category'),
 		},
+		// There is no try/catch in here, and that is the point. `registerTools` wraps every handler
+		// in `withErrorHandling`, which is the only thing that can put `isError` on a response — so
+		// a handler that catches and resolves reports a failed walk to the model as a successful
+		// call, which is the failure #28 took out of every write tool. The catch that used to sit
+		// here made that worse by returning the caught value as `details`, and
+		// `JSON.stringify(new Error('boom'))` is `{}`, so the detail it existed to surface was
+		// empty every single time. Let it throw.
 		async (client, params) => {
-			try {
-				// Get categories
-				const categoriesResponse = params.category_id
-					? await client.getCategory(params.category_id)
-					: await client.listCategories()
+			const budget: Budget = { remaining: MAX_REQUESTS, truncated: false }
 
-				const categories = readEntities(
-					categoriesResponse,
-					params.category_id ? 'category' : 'categories'
+			let categories: HelpCenterEntity[]
+			if (params.category_id === undefined) {
+				categories = await collectPages(budget, 'categories', (page) =>
+					client.listCategories({ per_page: PAGE_SIZE, page })
+				)
+			} else {
+				// One named category. A single fetch has no pages beneath it, so this is the one
+				// request spent outside `collectPages`. The budget is untouched at this point, so it
+				// cannot come back empty.
+				spend(budget)
+				categories = readEntities(await client.getCategory(params.category_id), 'category')
+			}
+
+			const walked = await mapWithLimit(categories, async (category) => ({
+				category,
+				sections: await collectPages(budget, 'sections', (page) =>
+					client.listSectionsByCategory(category.id, { per_page: PAGE_SIZE, page })
+				),
+			}))
+
+			let hierarchy: CategoryNode[]
+			let articlesReturned: number | undefined
+
+			if (params.include_articles) {
+				// Every section from every category as one flat pass. Nesting a bounded map inside
+				// another would put MAX_IN_FLIGHT squared requests in flight, which is the bound
+				// quietly not holding.
+				const sections = walked.flatMap((entry) => entry.sections)
+				const sectionsWithArticles = await mapWithLimit(sections, async (section) => ({
+					...section,
+					articles: await collectPages(budget, 'articles', (page) =>
+						client.listArticlesBySection(section.id, { per_page: PAGE_SIZE, page })
+					),
+				}))
+
+				articlesReturned = sectionsWithArticles.reduce(
+					(sum, section) => sum + section.articles.length,
+					0
 				)
 
-				const hierarchy = await Promise.all(
-					categories.map(async (category) => {
-						// Get sections for this category
-						const sectionsResponse = await client.listSectionsByCategory(category.id)
-						const sections = readEntities(sectionsResponse, 'sections')
+				// `mapWithLimit` answers in input order, and that is what lets one flat result be cut
+				// back into the categories its sections came from.
+				let cursor = 0
+				hierarchy = walked.map(({ category, sections: own }) => {
+					const slice = sectionsWithArticles.slice(cursor, cursor + own.length)
+					cursor += own.length
+					return { ...category, sections: slice }
+				})
+			} else {
+				hierarchy = walked.map(({ category, sections }) => ({ ...category, sections }))
+			}
 
-						const sectionsWithArticles = params.include_articles
-							? await Promise.all(
-									sections.map(async (section) => {
-										const articlesResponse = await client.listArticlesBySection(section.id)
-										return {
-											...section,
-											articles: readEntities(articlesResponse, 'articles'),
-										}
-									})
-								)
-							: sections
-
-						return {
-							...category,
-							sections: sectionsWithArticles,
-						}
-					})
-				)
-
-				return {
-					hierarchy,
-					total_categories: hierarchy.length,
-					total_sections: hierarchy.reduce((sum, cat) => sum + cat.sections.length, 0),
-					...(params.include_articles && {
-						total_articles: hierarchy.reduce(
-							(sum, cat) =>
-								sum +
-								cat.sections.reduce(
-									(secSum, sec) => secSum + (Array.isArray(sec.articles) ? sec.articles.length : 0),
-									0
-								),
-							0
-						),
-					}),
-				}
-			} catch (error) {
-				return { error: 'Failed to fetch Help Center hierarchy', details: error }
+			return {
+				// `truncated` heads the record rather than trailing it. The hierarchy below can run to
+				// thousands of lines, and a flag underneath that is a flag nobody reads. It is present
+				// on a complete walk too, so `false` is something the caller sees rather than infers
+				// from an absence.
+				truncated: budget.truncated,
+				...(budget.truncated && { truncation_note: TRUNCATION_NOTE }),
+				// Named for what they are. These count what the walk brought back, which is the same
+				// as the totals only when `truncated` is false — calling them totals is how the old
+				// walk turned reading page one into a confident claim about the whole Help Center.
+				categories_returned: hierarchy.length,
+				sections_returned: hierarchy.reduce((sum, category) => sum + category.sections.length, 0),
+				...(articlesReturned !== undefined && { articles_returned: articlesReturned }),
+				hierarchy,
 			}
 		}
 	),
