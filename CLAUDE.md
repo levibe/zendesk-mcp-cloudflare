@@ -140,13 +140,11 @@ Tools live in `src/tools/`, one file per Zendesk resource, gathered into `toolCa
 Two allowlists in `src/utils/tool-registry.ts` decide, and a tool has to satisfy one of them:
 
 - `isReadOnlyTool` covers the query verbs — the `list_`, `get_` and `search_` prefixes, plus `search` and `support_info` by name.
-- `WRITE_TOOLS_ENABLED` names the individual writes permitted anyway. That set is the authority on which ones; today it holds the two macro writes.
+- `WRITE_TOOLS_ENABLED` names the individual writes permitted anyway, and is the authority on which ones. The comment on that set carries the test a write has to pass to get in, and is the place to argue about adding one.
 
 Anything satisfying neither is withheld at registration and cannot be reached by any client. `create_ticket` and `delete_ticket` are defined, compiled and covered by the type checker, and no client is ever offered them.
 
 Both rules are allowlists rather than denylists on purpose, so a newly added tool stays unexposed until somebody classifies it deliberately. That is why permitting a write means adding its name to the set, and why adding `create_` to the prefixes above would be the wrong shortcut — a prefix publishes every future create tool on the day it is written, which inverts the property the rule exists to hold.
-
-Macro writes are permitted because of what a macro is: it changes nothing when it is created and sits in a menu until an agent applies it to a ticket by hand. A trigger fires on every matching ticket create or update, and an automation runs against every matching ticket on a schedule, so a malformed one reaches customers before anyone reviews it. #20 is where that judgement gets generalised into a permission model, once #22 and #23 have said what the general case needs.
 
 ## Testing
 

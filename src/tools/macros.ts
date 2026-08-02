@@ -1,10 +1,7 @@
 /**
- * Macro management tools for creating and managing ticket action shortcuts
- *
- * These two writes are the first any client is offered. A macro is safe to let through on
- * its own because it does nothing until an agent picks it from a menu and applies it to a
- * ticket by hand — unlike a trigger, which fires on every matching update, or an automation,
- * which runs on a schedule. See WRITE_TOOLS_ENABLED in utils/tool-registry.
+ * These two writes are the first any client is offered. `WRITE_TOOLS_ENABLED` in
+ * utils/tool-registry is where that decision lives, and says why a macro is safe to publish
+ * when a trigger and an automation are not.
  */
 
 import type { ToolDefinition } from '../types/zendesk'
