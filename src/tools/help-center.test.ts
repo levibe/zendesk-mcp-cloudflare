@@ -280,7 +280,10 @@ describe('get_help_center_hierarchy', () => {
 			expect(result.hierarchy).toEqual([])
 			expect(result.categories_returned).toBe(0)
 			expect(result.truncated).toBe(true)
-			expect(result.truncation_note).toContain('could not follow')
+			// "could not read" rather than "could not follow": none of these bodies had a marker
+			// worth following, and the row below with a readable next_page: null is the one that
+			// makes the difference concrete. The note has to diagnose the body, not the cursor.
+			expect(result.truncation_note).toContain('could not read')
 		})
 
 		it('treats a section body it cannot read as no sections, and says the walk is partial', async () => {

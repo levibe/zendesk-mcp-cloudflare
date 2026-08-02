@@ -62,7 +62,7 @@ const MAX_PAGES_PER_LIST = 5
  * With `include_articles` the fan-out is 1 + C + (C x S), which on a real Help Center reaches a
  * platform limit rather than an answer: Workers allows 50 subrequests per request on the Free
  * plan, 1000 on the paid ones. Forty keeps a healthy walk inside the smaller of those with room
- * to spare. It is not a guarantee under failure, because every GET is retried up to three times
+ * to spare. It is not a guarantee under failure, because every GET gets up to three attempts
  * and one list call meeting a wall of 503s spends more than one subrequest — but that walk ends
  * as a reported error, and an error is the outcome worth protecting. The jitter on the retry
  * ladder is not the same protection and does not stand in for this one: it spreads the retries
@@ -209,25 +209,31 @@ const mapWithLimit = async <T, R>(items: T[], task: (item: T) => Promise<R>): Pr
 /**
  * What the response says when it is handing back part of the Help Center rather than all of it.
  *
- * Worded around the fact rather than the cause, because there are three causes and the note
- * cannot tell which one fired without the budget carrying a reason it does not carry. Naming
- * only the two limits was wrong once already: an unreadable page marker truncates after a
- * single request, and a note claiming the walk had reached a forty-request ceiling would be
- * describing something that plainly had not happened.
+ * Worded around the fact rather than the cause, because the note cannot tell which cause fired
+ * without the budget carrying a reason it does not carry. Naming only the two limits was wrong
+ * once already: an unreadable page truncates after a single request, and a note claiming the
+ * walk had reached a forty-request ceiling would be describing something that plainly had not
+ * happened.
  *
- * The remedy has to be conditional for the same reason. Asking for a smaller slice answers the
- * two limits and does nothing at all for an unreadable body — a narrower walk meets the same
- * marker and stops in the same place, so a model told to narrow would keep narrowing forever.
+ * The third clause covers two shapes rather than one, and keeping them together is deliberate.
+ * A body with no list in it and a marker that cannot be followed are different failures — the
+ * first is a response the walk could not find its list in at all, the second a list it read and
+ * then lost its place in — but they are one fact to a caller, and an earlier wording naming
+ * only the marker told a model its cursor was bad when the body had simply not been JSON.
+ *
+ * The remedy has to be conditional. Asking for a smaller slice answers the two limits and does
+ * nothing for a page that could not be read: a narrower walk reads the same page and stops in
+ * the same place, so a model told to narrow would keep narrowing forever.
  */
 const TRUNCATION_NOTE =
 	'This result is incomplete, so every count here describes only what came back rather than ' +
 	'what exists, and categories, sections or articles are missing. A walk stops early for one ' +
 	`of three reasons: it reached its ceiling of ${MAX_REQUESTS} requests, one list ran past ` +
-	`${MAX_PAGES_PER_LIST} pages, or a page marker came back in a shape it could not follow. ` +
-	'The first two are answered by asking for a smaller slice — pass category_id to walk a ' +
-	'single category, or leave include_articles unset so the walk does not spend its requests ' +
-	'on articles. The third is not: a narrower walk meets the same marker and stops in the ' +
-	'same place, so retry rather than narrow.'
+	`${MAX_PAGES_PER_LIST} pages, or a page came back in a shape it could not read — a body ` +
+	'with no list in it, or a marker it could not follow. The first two are answered by asking ' +
+	'for a smaller slice — pass category_id to walk a single category, or leave include_articles ' +
+	'unset so the walk does not spend its requests on articles. The third is not: a narrower ' +
+	'walk reads the same page and stops in the same place, so retry rather than narrow.'
 
 export const helpCenterTools: ToolDefinition[] = [
 	createTool(
