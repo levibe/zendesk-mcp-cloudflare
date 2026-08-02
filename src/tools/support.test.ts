@@ -33,9 +33,21 @@ describe('support_info', () => {
 		// call zero without casting. `vi.stubGlobal` takes the mock untyped either way.
 		const fetchMock = vi.fn(
 			async (_url: string, _init: RequestInit) =>
-				new Response(JSON.stringify({ user: { id: 1, email: credentials.email } }), {
-					headers: { 'content-type': 'application/json' },
-				})
+				new Response(
+					JSON.stringify({
+						user: {
+							id: 1,
+							url: 'https://example.zendesk.com/api/v2/users/1.json',
+							name: 'Support',
+							email: credentials.email,
+							role: 'admin',
+							active: true,
+							suspended: false,
+							authenticity_token: 'do-not-hand-this-out',
+						},
+					}),
+					{ headers: { 'content-type': 'application/json' } }
+				)
 		)
 		vi.stubGlobal('fetch', fetchMock)
 
@@ -43,7 +55,31 @@ describe('support_info', () => {
 
 		expect(fetchMock).toHaveBeenCalledOnce()
 		expect(fetchMock.mock.calls[0][0]).toBe('https://example.zendesk.com/api/v2/users/me.json')
-		expect(result).toEqual({ user: { id: 1, email: credentials.email } })
+		expect(result).toEqual({
+			account: 'example.zendesk.com',
+			user: {
+				id: 1,
+				name: 'Support',
+				email: credentials.email,
+				role: 'admin',
+				active: true,
+				suspended: false,
+			},
+		})
+	})
+
+	// summarizeCurrentUser covers the reshaping on its own; this checks the handler is wired to
+	// it at all, since returning the raw body would pass every other assertion in this file.
+	it('does not pass the raw body through, which would carry an authenticity token', async () => {
+		const fetchMock = vi.fn(
+			async () =>
+				new Response(JSON.stringify({ user: { id: 1, authenticity_token: 'leaked' } }), {
+					headers: { 'content-type': 'application/json' },
+				})
+		)
+		vi.stubGlobal('fetch', fetchMock)
+
+		expect(JSON.stringify(await supportInfo.handler(client, {}))).not.toContain('leaked')
 	})
 
 	// The regression that matters. A handler that resolves without touching fetch is exactly the

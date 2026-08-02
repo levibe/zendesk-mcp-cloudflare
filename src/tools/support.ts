@@ -4,6 +4,7 @@
 
 import type { ToolDefinition } from '../types/zendesk'
 import { createTool } from '../utils/tool-registry'
+import { summarizeCurrentUser } from '../utils/support-response'
 
 export const supportTools: ToolDefinition[] = [
 	/**
@@ -15,13 +16,17 @@ export const supportTools: ToolDefinition[] = [
 	 *
 	 * The name has to stay. `support_info` is named in READ_ONLY_TOOL_NAMES rather than matching
 	 * a query prefix, so renaming it withholds the tool from every client.
+	 *
+	 * This is one of the few tools that does not hand its response straight back. The current-user
+	 * body carries an `authenticity_token`, and a tool people run to reassure themselves about
+	 * credentials should not be the one that leaks one into a model's context.
 	 */
 	createTool(
 		'support_info',
 		'Check the Zendesk connection and report which user the server authenticates as',
 		{},
 		async (client) => {
-			return client.getCurrentUser()
+			return summarizeCurrentUser(await client.getCurrentUser())
 		}
 	),
 ]
