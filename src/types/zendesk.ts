@@ -46,10 +46,35 @@ export interface ToolDefinition {
 	successMessage?: string
 }
 
-// Common Pagination Parameters
+/**
+ * The pagination arguments every list and search tool spreads.
+ *
+ * The ceiling on `per_page` is Zendesk's rather than a preference of ours. Everything reached
+ * through this shape — the Support list endpoints, the Search API and the Help Center ones —
+ * stops at a hundred records a page, and `list_chats` reaches an API that pages by a different
+ * parameter and ignores this one either way. So a caller asking for a thousand was never going
+ * to be sent a thousand; it only left the model reading a page of a size it had not chosen and
+ * drawing conclusions from it. The bound is checked here so that the refusal names the argument
+ * and the model can correct itself, which is more than it can do with whatever Zendesk decides
+ * to make of a number it does not honour.
+ *
+ * Both bounds are `.int()` because these are record counts. A fractional `per_page` is a caller
+ * having computed something rather than having decided something, and it reaches Zendesk as a
+ * query string that gets parsed however that endpoint happens to parse it.
+ *
+ * Do not raise the hundred to serve an incremental export tool. Those endpoints take up to a
+ * thousand, but they are a different pagination scheme with its own cursor parameters, so one
+ * needs a shape of its own rather than a loosening of the bound every other tool sits behind.
+ */
 export const paginationSchema = {
-	page: z.number().optional().describe('Page number for pagination'),
-	per_page: z.number().optional().describe('Number of items per page (max 100)'),
+	page: z.number().int().min(1).optional().describe('Page number for pagination, starting at 1'),
+	per_page: z
+		.number()
+		.int()
+		.min(1)
+		.max(100)
+		.optional()
+		.describe('Number of items per page (1-100)'),
 }
 
 // Common Sorting Parameters
