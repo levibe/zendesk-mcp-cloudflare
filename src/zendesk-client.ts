@@ -118,6 +118,21 @@ const TOTAL_TIMEOUT_MS = 30_000
 const MINIMUM_ATTEMPT_MS = 1_000
 
 /**
+ * How many attempts a retried call gets in total.
+ *
+ * A constant rather than a parameter because it is a tuning decision like the three above it,
+ * and nothing has ever wanted a different number — it sat in `requestWithRetry`'s signature
+ * for long enough to collide with `request`'s `timeoutMs`, which is #55.
+ *
+ * It is the backstop for failures that arrive instantly, and only for those. Once an attempt
+ * takes real time the deadline decides and this never binds. Removing it would not simplify
+ * as much as it looks: instant failures still sleep the backoff ladder, so the deadline alone
+ * would permit about eight of them rather than three, and a hard-down Zendesk would be asked
+ * eight times per call instead of three.
+ */
+const MAX_ATTEMPTS = 3
+
+/**
  * Yields an error and then each `cause` beneath it. `request` rewraps whatever it caught, so
  * the failure worth classifying is usually a link or two down rather than in hand — and fetch
  * itself nests, reporting a socket error as the cause of a bare "fetch failed".
@@ -241,7 +256,7 @@ export class ZendeskClient {
 		endpoint: string,
 		data?: unknown,
 		params?: Record<string, unknown>,
-		timeoutMs = DEFAULT_TIMEOUT_MS
+		{ timeoutMs = DEFAULT_TIMEOUT_MS }: { timeoutMs?: number } = {}
 	): Promise<unknown> {
 		// Everything down to the `try` sits outside it on purpose, and where the try starts is
 		// the point rather than a detail of layout. The catch rewraps whatever it sees as a
@@ -427,29 +442,27 @@ export class ZendeskClient {
 	/**
 	 * One deadline governs the call. Attempts fit inside it rather than each starting a fresh
 	 * timeout, because what a caller cares about is how long until it hears back, not how long
-	 * any individual attempt was allowed to run.
-	 *
-	 * `maxRetries` stays, but it is no longer the interesting bound. It caps the loop when
-	 * failures arrive instantly and the deadline would otherwise permit a great many of them;
-	 * the deadline is what decides in every case where an attempt takes real time.
+	 * any individual attempt was allowed to run. `MAX_ATTEMPTS` bounds the loop for failures
+	 * that arrive instantly, and never binds once an attempt takes real time.
 	 */
 	async requestWithRetry(
 		method: string,
 		endpoint: string,
 		data?: unknown,
-		params?: Record<string, unknown>,
-		maxRetries = 3
+		params?: Record<string, unknown>
 	): Promise<unknown> {
 		const deadline = Date.now() + TOTAL_TIMEOUT_MS
 		let lastError: Error | undefined
 
-		for (let attempt = 0; attempt < maxRetries; attempt++) {
+		for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
 			try {
-				return await this.request(method, endpoint, data, params, deadline - Date.now())
+				return await this.request(method, endpoint, data, params, {
+					timeoutMs: deadline - Date.now(),
+				})
 			} catch (error) {
 				lastError = error as Error
 
-				if (attempt === maxRetries - 1 || !this.isRetryableError(error)) {
+				if (attempt === MAX_ATTEMPTS - 1 || !this.isRetryableError(error)) {
 					throw error
 				}
 
@@ -490,7 +503,7 @@ export class ZendeskClient {
 				// not to clamp the wait down to something Zendesk did not agree to.
 				if (Date.now() + delay + MINIMUM_ATTEMPT_MS > deadline) {
 					console.warn(
-						`Request failed (attempt ${attempt + 1}/${maxRetries}) and the ${TOTAL_TIMEOUT_MS}ms deadline leaves no room to wait ${delay}ms and retry`,
+						`Request failed (attempt ${attempt + 1}/${MAX_ATTEMPTS}) and the ${TOTAL_TIMEOUT_MS}ms deadline leaves no room to wait ${delay}ms and retry`,
 						{
 							error: error instanceof Error ? error.message : String(error),
 							retryAfterMs: requested,
@@ -502,7 +515,7 @@ export class ZendeskClient {
 				}
 
 				console.warn(
-					`Request failed (attempt ${attempt + 1}/${maxRetries}), retrying in ${delay}ms...`,
+					`Request failed (attempt ${attempt + 1}/${MAX_ATTEMPTS}), retrying in ${delay}ms...`,
 					{
 						error: error instanceof Error ? error.message : String(error),
 						method,
