@@ -344,7 +344,7 @@ export class ZendeskClient {
 	/**
 	 * Check if an error is retryable (transient failure)
 	 *
-	 * Classification reads the status and the error's identity, never the message text. The
+	 * Classification reads the status and nothing else, and never the message text. The
 	 * message is built out of the Zendesk response body, so matching on it cannot tell a 502
 	 * that happened from a 502 the body merely quotes.
 	 *
