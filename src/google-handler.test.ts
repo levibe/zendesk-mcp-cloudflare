@@ -12,6 +12,22 @@
 import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import type { AuthRequest, OAuthHelpers } from '@cloudflare/workers-oauth-provider'
 import { GoogleHandler } from './google-handler'
+import {
+	clientIdAlreadyApproved,
+	parseRedirectApproval,
+	renderApprovalDialog,
+} from './workers-oauth-utils'
+
+// Those three helpers are the seam between /authorize and the signed approval cookie, and they
+// have tests of their own next door. Replacing the module is what lets these tests state the
+// decision the route turns on — this client is already approved, this approval is well-formed —
+// instead of minting a signed cookie to say it, and what makes the dialog something a test can
+// recognise without parsing a page of HTML.
+vi.mock('./workers-oauth-utils', () => ({
+	clientIdAlreadyApproved: vi.fn(),
+	parseRedirectApproval: vi.fn(),
+	renderApprovalDialog: vi.fn(),
+}))
 
 const authRequest: AuthRequest = {
 	responseType: 'code',
@@ -24,8 +40,20 @@ const authRequest: AuthRequest = {
 /** The state exactly as redirectToGoogle mints it. */
 const validState = btoa(JSON.stringify(authRequest))
 
+/** What lookupClient hands the approval dialog to name the client asking. */
+const clientInfo = {
+	clientId: 'test-client',
+	clientName: 'Test MCP Client',
+	redirectUris: ['https://client.example.com/oauth/callback'],
+}
+
+/** The hostname the worker is deployed on, unless a test says otherwise. */
+const workerOrigin = 'https://zendesk-mcp.example.workers.dev'
+
 let completeAuthorization: Mock
 let googleFetch: Mock
+let lookupClient: Mock
+let parseAuthRequest: Mock
 let tokenResponse: () => Response
 let userinfoResponse: () => Response
 
@@ -43,6 +71,22 @@ const testEnv = (overrides: Record<string, unknown> = {}) =>
 
 const callback = (query: Record<string, string>, env = testEnv()) =>
 	GoogleHandler.request(`/callback?${new URLSearchParams(query).toString()}`, undefined, env)
+
+/** /authorize reaches for two provider methods that /callback never touches. */
+const authorizeEnv = (overrides: Record<string, unknown> = {}) =>
+	testEnv({
+		OAUTH_PROVIDER: { completeAuthorization, lookupClient, parseAuthRequest },
+		...overrides,
+	})
+
+const authorize = (env = authorizeEnv(), origin = workerOrigin) =>
+	GoogleHandler.request(`${origin}/authorize`, undefined, env)
+
+const approve = (env = authorizeEnv(), origin = workerOrigin) =>
+	GoogleHandler.request(`${origin}/authorize`, { method: 'POST' }, env)
+
+/** The Google consent URL a 302 points at, ready to be read parameter by parameter. */
+const googleUrl = (response: Response) => new URL(response.headers.get('location') ?? '')
 
 beforeEach(() => {
 	completeAuthorization = vi.fn(async () => ({
@@ -278,5 +322,172 @@ describe('GET /callback', () => {
 
 		expect(response.status).toBe(302)
 		expect(completeAuthorization).toHaveBeenCalledOnce()
+	})
+})
+
+describe('/authorize', () => {
+	beforeEach(() => {
+		parseAuthRequest = vi.fn(async () => authRequest)
+		lookupClient = vi.fn(async () => clientInfo)
+
+		// `restoreMocks` in vitest.config.ts reaches vi.spyOn spies, and these three are plain
+		// vi.fn mocks handed over by the module factory above — so each is reset here, before
+		// its default is set, rather than left to carry calls in from the previous test.
+		vi.mocked(clientIdAlreadyApproved).mockReset().mockResolvedValue(false)
+		vi.mocked(renderApprovalDialog)
+			.mockReset()
+			.mockImplementation(() => new Response('<approval dialog>'))
+		vi.mocked(parseRedirectApproval)
+			.mockReset()
+			.mockResolvedValue({
+				state: { oauthReqInfo: authRequest },
+				headers: { 'set-cookie': 'mcp_approved_clients=signed; Path=/' },
+			})
+	})
+
+	describe('GET /authorize', () => {
+		// parseAuthRequest signals an unregistered client, a redirect URI that does not match the
+		// registration, and a dangerous redirect scheme all by throwing, so each one was a bare 500
+		// before the catch went in. Asserting the body as well as the status is what proves the
+		// route answered: an exception escaping to Hono's onError reads as 500 'Internal Server
+		// Error', never as 400 'Invalid authorization request'.
+		it('answers 400 when parseAuthRequest rejects the request', async () => {
+			vi.spyOn(console, 'warn').mockImplementation(() => {})
+			parseAuthRequest.mockRejectedValue(new Error('Invalid redirect URI for client'))
+
+			const response = await authorize()
+
+			expect(response.status).toBe(400)
+			await expect(response.text()).resolves.toBe('Invalid authorization request')
+			expect(clientIdAlreadyApproved).not.toHaveBeenCalled()
+			expect(renderApprovalDialog).not.toHaveBeenCalled()
+		})
+
+		// Same split as the decode failure on /callback, and the comment on the catch says why: the
+		// caller is still unauthenticated here, so the provider's own text goes to the log and the
+		// response stays one fixed string. Those messages are static strings today — relaying a
+		// dependency's error verbatim only stays safe until a release adds detail to one. The two
+		// cases below are the two halves of the ternary that decides what gets logged.
+		it.each([
+			['an Error', new Error('Invalid redirect URI for client'), 'Invalid redirect URI for client'],
+			['a bare string', 'client is not registered', 'client is not registered'],
+		])('logs %s thrown by parseAuthRequest without relaying it', async (_label, thrown, logged) => {
+			const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+			parseAuthRequest.mockRejectedValue(thrown)
+
+			const response = await authorize()
+
+			expect(warn).toHaveBeenCalledWith('parseAuthRequest rejected the request:', logged)
+			await expect(response.text()).resolves.toBe('Invalid authorization request')
+		})
+
+		it('answers 400 when the parsed request carries no clientId', async () => {
+			parseAuthRequest.mockResolvedValue({ ...authRequest, clientId: '' })
+
+			const response = await authorize()
+
+			expect(response.status).toBe(400)
+			await expect(response.text()).resolves.toBe('Invalid request')
+			expect(renderApprovalDialog).not.toHaveBeenCalled()
+		})
+
+		it('skips the dialog and redirects to Google when the client is already approved', async () => {
+			vi.mocked(clientIdAlreadyApproved).mockResolvedValue(true)
+
+			const response = await authorize()
+
+			expect(clientIdAlreadyApproved).toHaveBeenCalledWith(
+				expect.any(Request),
+				'test-client',
+				'test-cookie-secret'
+			)
+			expect(response.status).toBe(302)
+			expect(googleUrl(response).hostname).toBe('accounts.google.com')
+			expect(renderApprovalDialog).not.toHaveBeenCalled()
+		})
+
+		it('renders the approval dialog when the client is not already approved', async () => {
+			const response = await authorize()
+
+			expect(lookupClient).toHaveBeenCalledWith('test-client')
+			expect(renderApprovalDialog).toHaveBeenCalledWith(
+				expect.any(Request),
+				expect.objectContaining({ client: clientInfo, state: { oauthReqInfo: authRequest } })
+			)
+			expect(response.status).toBe(200)
+			await expect(response.text()).resolves.toBe('<approval dialog>')
+			expect(response.headers.get('location')).toBeNull()
+		})
+	})
+
+	describe('POST /authorize', () => {
+		it('answers 400 when the approval carries no authorization request', async () => {
+			vi.mocked(parseRedirectApproval).mockResolvedValue({ state: {}, headers: {} })
+
+			const response = await approve()
+
+			expect(response.status).toBe(400)
+			await expect(response.text()).resolves.toBe('Invalid request')
+		})
+
+		// The headers parseRedirectApproval hands back are the approval cookie, which is the whole
+		// point of having approved: without it riding along on this redirect the next authorization
+		// asks again. Nothing about the redirect itself would look wrong if it were dropped, so the
+		// assertion on set-cookie is doing work the status and location cannot.
+		it('redirects to Google carrying the approval cookie the parse handed back', async () => {
+			const response = await approve()
+
+			expect(parseRedirectApproval).toHaveBeenCalledWith(expect.any(Request), 'test-cookie-secret')
+			expect(response.status).toBe(302)
+			expect(googleUrl(response).hostname).toBe('accounts.google.com')
+			expect(response.headers.get('set-cookie')).toBe('mcp_approved_clients=signed; Path=/')
+		})
+	})
+
+	describe('the Google consent URL it redirects to', () => {
+		beforeEach(() => {
+			vi.mocked(clientIdAlreadyApproved).mockResolvedValue(true)
+		})
+
+		// Google refuses the request outright if any of these is missing or wrong, so a redirect
+		// that has lost one fails at the consent screen rather than here.
+		it('carries the client id, redirect URI, scope, response type and state', async () => {
+			const url = googleUrl(await authorize())
+
+			expect(`${url.origin}${url.pathname}`).toBe('https://accounts.google.com/o/oauth2/v2/auth')
+			expect(url.searchParams.get('client_id')).toBe('test-google-client-id')
+			expect(url.searchParams.get('redirect_uri')).toBe(`${workerOrigin}/callback`)
+			expect(url.searchParams.get('scope')).toBe('email profile')
+			expect(url.searchParams.get('response_type')).toBe('code')
+			// The same unsigned base64 the /callback tests above decode, which is what makes the
+			// two halves of the flow one flow rather than two that happen to agree.
+			expect(url.searchParams.get('state')).toBe(validState)
+		})
+
+		// The callback is built from whichever host the request arrived on, which README documents
+		// because of how it fails when Google does not know that host: every endpoint on the worker
+		// goes on answering normally and the flow dies at the consent screen with
+		// redirect_uri_mismatch. So connecting through a custom domain needs that domain registered
+		// too, and registering the workers.dev hostname alone is not enough.
+		it.each([
+			['the workers.dev hostname', workerOrigin],
+			['a custom domain', 'https://zendesk.example.com'],
+		])('builds the redirect URI from %s the request arrived on', async (_label, origin) => {
+			const url = googleUrl(await authorize(authorizeEnv(), origin))
+
+			expect(url.searchParams.get('redirect_uri')).toBe(`${origin}/callback`)
+		})
+
+		it('carries hd when HOSTED_DOMAIN is set', async () => {
+			const url = googleUrl(await authorize(authorizeEnv({ HOSTED_DOMAIN: 'example.com' })))
+
+			expect(url.searchParams.get('hd')).toBe('example.com')
+		})
+
+		it('leaves hd off when HOSTED_DOMAIN is unset', async () => {
+			const url = googleUrl(await authorize())
+
+			expect(url.searchParams.has('hd')).toBe(false)
+		})
 	})
 })
