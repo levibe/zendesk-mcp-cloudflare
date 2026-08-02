@@ -1,4 +1,6 @@
 import type {
+	ArticleCreatePayload,
+	ArticleUpdatePayload,
 	AutomationCreatePayload,
 	AutomationUpdatePayload,
 	MacroCreatePayload,
@@ -881,14 +883,14 @@ export class ZendeskClient {
 		return this.send('GET', `/help_center/articles/${id}.json`)
 	}
 
-	async createArticle(data: any, sectionId: number) {
+	async createArticle(data: ArticleCreatePayload, sectionId: number) {
 		this.validateId(sectionId)
 		return this.send('POST', `/help_center/sections/${sectionId}/articles.json`, {
 			article: data,
 		})
 	}
 
-	async updateArticle(id: number, data: any) {
+	async updateArticle(id: number, data: ArticleUpdatePayload) {
 		this.validateId(id)
 		return this.send('PUT', `/help_center/articles/${id}.json`, { article: data })
 	}

@@ -1,13 +1,22 @@
 /**
- * `get_help_center_hierarchy` is the one tool here that reads into a response body instead
- * of handing it to JSON.stringify, so it is the one with behaviour to lose. These cover the
- * walk and, through it, the `readEntities` narrowing that #10 put underneath it — plus the
- * three things the walk now has to be honest about: what it paged, what it could not reach,
- * and that a failure is a failure.
+ * Two things in this file have behaviour to lose, and the rest hand a response straight to
+ * JSON.stringify.
+ *
+ * `get_help_center_hierarchy` is the one tool that reads into a response body, so most of what
+ * follows covers the walk and, through it, the `readEntities` narrowing that #10 put underneath
+ * it — plus the three things the walk has to be honest about: what it paged, what it could not
+ * reach, and that a failure is a failure.
+ *
+ * The article writes at the end are the other. An article is the only thing these tools build
+ * that a customer reads directly, so what those tests hold is the draft flag and the fact that
+ * nothing here can publish or change who is allowed to look.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { z } from 'zod'
 import { helpCenterTools } from './help-center'
+import { createArticleSchema, updateArticleSchema } from '../types/zendesk'
+import type { ArticleCreatePayload, ArticleUpdatePayload } from '../types/zendesk'
 import type { ZendeskClient } from '../zendesk-client'
 
 const hierarchyTool = helpCenterTools.find((tool) => tool.name === 'get_help_center_hierarchy')!
@@ -569,5 +578,170 @@ describe('readEntities, through the tools that share it', () => {
 		const result = await walk(client)
 
 		expect(result.hierarchy[0].sections).toEqual([{ id: 10, name: 'Invoices' }])
+	})
+})
+
+const createArticle = helpCenterTools.find((tool) => tool.name === 'create_article')!
+const updateArticle = helpCenterTools.find((tool) => tool.name === 'update_article')!
+
+/** What MCP validates against before either handler is called. */
+const createArticlePayload = z.object({ section_id: z.number(), ...createArticleSchema })
+const updateArticlePayload = z.object(updateArticleSchema)
+
+/** Stands in for the two client methods, under the signatures they actually declare. */
+const stubArticleClient = (article: unknown = { article: { id: 1 } }) => ({
+	createArticle: vi.fn(async (_data: ArticleCreatePayload, _sectionId: number) => article),
+	updateArticle: vi.fn(async (_id: number, _data: ArticleUpdatePayload) => article),
+})
+
+type StubbedArticleClient = ReturnType<typeof stubArticleClient>
+
+const callArticleTool = (
+	tool: typeof createArticle,
+	client: StubbedArticleClient,
+	params: Record<string, unknown>
+) => tool.handler(client as unknown as ZendeskClient, params)
+
+/** The smallest article the schema accepts, so a test can vary one thing about it. */
+const validArticle = {
+	section_id: 7,
+	title: 'Resetting your password',
+	locale: 'en-us',
+	permission_group_id: 3,
+	user_segment_id: null,
+}
+
+describe('the article create schema', () => {
+	it.each(['title', 'locale', 'permission_group_id', 'user_segment_id'])(
+		'refuses an article that omits %s',
+		(field) => {
+			const { [field]: _omitted, ...withoutField } = validArticle as Record<string, unknown>
+
+			expect(createArticlePayload.safeParse(withoutField).success).toBe(false)
+		}
+	)
+
+	// Required and nullable rather than optional, which is the point. Null means everyone can
+	// read it, and a caller has to have said so — an omitted visibility field is how an article
+	// ends up more visible than anyone intended.
+	it('takes a null user segment, meaning everybody, but only when it is stated', () => {
+		expect(createArticlePayload.parse(validArticle).user_segment_id).toBeNull()
+	})
+
+	// The guardrail. No shape accepts `draft`, so a caller cannot ask for a published article,
+	// and Zod strips what it does not declare — hence absence rather than a refusal.
+	it('does not accept draft, so a caller cannot ask to publish', () => {
+		expect(createArticlePayload.parse({ ...validArticle, draft: false })).not.toHaveProperty(
+			'draft'
+		)
+	})
+
+	// Pinned because it looks like an oversight and is not. Nothing inspects the body, because a
+	// check written here would be a second sanitizer — worse than Zendesk's own and trusted more
+	// for sitting closer to the model. What protects the reader is that the article is a draft
+	// nobody sees until a human has read it. Inverting this test is how that decision changes.
+	it('passes the body through unexamined, HTML and all', () => {
+		const body = '<p>Hello</p><script>alert(1)</script>'
+
+		expect(createArticlePayload.parse({ ...validArticle, body }).body).toBe(body)
+	})
+})
+
+describe('the article update schema', () => {
+	it('requires nothing, since Zendesk changes only the fields it is given', () => {
+		expect(updateArticlePayload.parse({})).toEqual({})
+	})
+
+	// Editing what an article says is one thing; changing who may read it is another, and it is
+	// the change nobody notices until a customer has read something internal. Both stay set at
+	// creation. `locale` goes with them because it names which translation is being edited
+	// rather than being a property of the article to revise.
+	it.each(['permission_group_id', 'user_segment_id', 'locale', 'draft'])(
+		'does not accept %s, so an update cannot change who sees the article',
+		(field) => {
+			expect(updateArticlePayload.parse({ [field]: 1 })).not.toHaveProperty(field)
+		}
+	)
+
+	// Zendesk does not document whether sending label_names replaces the set or merges into it,
+	// so the wording is chosen to be right either way: send them all. A caller sending only the
+	// new label is correct in just one of the two cases.
+	it('tells a caller to send the complete label list', () => {
+		const wording = updateArticleSchema.label_names.unwrap().description ?? ''
+
+		expect(wording).toMatch(/complete/i)
+		expect(wording).not.toBe(createArticleSchema.label_names.unwrap().description)
+	})
+})
+
+describe('create_article', () => {
+	// The forced flag, which is what makes a schema that never accepts `draft` add up to an
+	// article no customer can see.
+	it('forces the article to a draft rather than leaving Zendesk to default it', async () => {
+		const client = stubArticleClient()
+
+		await callArticleTool(createArticle, client, validArticle)
+
+		expect(client.createArticle.mock.calls[0][0].draft).toBe(true)
+	})
+
+	it('overrides a draft flag that reaches it anyway', async () => {
+		const client = stubArticleClient()
+
+		await callArticleTool(createArticle, client, { ...validArticle, draft: false })
+
+		expect(client.createArticle.mock.calls[0][0].draft).toBe(true)
+	})
+
+	// An article is created inside a section, so Zendesk takes that id in the URL rather than in
+	// the body. This is the one place an article write differs mechanically from every other.
+	it('sends the section id as its own argument, not inside the payload', async () => {
+		const client = stubArticleClient()
+
+		await callArticleTool(createArticle, client, validArticle)
+
+		const [payload, sectionId] = client.createArticle.mock.calls[0]
+		expect(sectionId).toBe(7)
+		expect(payload).not.toHaveProperty('section_id')
+	})
+
+	// Returning the response rather than a finished McpToolResponse is what keeps `isError`
+	// reaching the client, since registerTools wraps every handler once already. #28.
+	it('answers with what Zendesk sent back, not with a wrapped response', async () => {
+		const created = { article: { id: 42 } }
+
+		expect(await callArticleTool(createArticle, stubArticleClient(created), validArticle)).toBe(
+			created
+		)
+	})
+
+	// A bare "created successfully" is what would leave a model believing the article is live.
+	it('says in its confirmation that the article is only a draft', () => {
+		expect(createArticle.successMessage).toMatch(/draft/i)
+	})
+})
+
+describe('update_article', () => {
+	it('addresses the article by id and sends everything else as the payload', async () => {
+		const client = stubArticleClient()
+
+		await callArticleTool(updateArticle, client, { id: 42, title: 'Renamed' })
+
+		expect(client.updateArticle).toHaveBeenCalledWith(42, { title: 'Renamed' })
+	})
+
+	// Zendesk accepts an update with nothing in it and changes nothing, which reads back as a
+	// success. A model that sent no fields meant to send some, so say that instead.
+	it('refuses an update that changes nothing rather than calling Zendesk', async () => {
+		const client = stubArticleClient()
+
+		await expect(callArticleTool(updateArticle, client, { id: 42 })).rejects.toThrow(
+			'update_article needs at least one field to change'
+		)
+		expect(client.updateArticle).not.toHaveBeenCalled()
+	})
+
+	it('carries the confirmation registration heads the article with', () => {
+		expect(updateArticle.successMessage).toBe('Article updated successfully!')
 	})
 })

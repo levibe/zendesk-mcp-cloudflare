@@ -392,6 +392,118 @@ export type AutomationCreatePayload = InferParams<typeof createAutomationSchema>
 export type AutomationUpdatePayload = InferParams<typeof updateAutomationSchema>
 
 /**
+ * What an article says and where it sits, as opposed to who is allowed to read it.
+ *
+ * The split is the whole design of the two article writes. Everything here is editable by
+ * both of them, and the three fields `createArticleSchema` adds below — the locale, the
+ * permission group and the user segment — are settable once, when the article is created, and
+ * are not offered to `update_article` at all. Editing what an article says is one thing;
+ * changing who can see it is another, and it is the change nobody notices until a customer
+ * has read something internal. That stays a human action in the Zendesk UI, alongside
+ * publishing.
+ *
+ * `body` is HTML and is deliberately unconstrained. Nothing here inspects it, and the reason
+ * is that a check written in this file would be a second sanitizer, worse than Zendesk's own
+ * and trusted more for sitting closer to the model. What actually protects the reader is that
+ * the article is created as a draft and no customer sees it until a human has read it.
+ */
+const articleContentSchema = {
+	title: z.string().min(1).describe('Article title'),
+	body: z.string().optional().describe('Article body, as HTML'),
+	label_names: z.array(z.string()).optional().describe('Labels applied to the article'),
+	promoted: z.boolean().optional().describe('Whether the article is promoted in its section'),
+	position: z
+		.number()
+		.int()
+		.min(0)
+		.optional()
+		.describe('Order this article appears in within its section'),
+	comments_disabled: z
+		.boolean()
+		.optional()
+		.describe('Whether end users are prevented from commenting on the article'),
+}
+
+/**
+ * The fields a new article may set, plus the three that fix its language and its audience.
+ *
+ * All three are required, and two of them are required by us rather than by Zendesk.
+ * `permission_group_id` is Zendesk's own requirement. `user_segment_id` it documents as
+ * optional-ish, in that either it or `user_segment_ids` must be given — here it is required
+ * and nullable, so a caller has to say who the audience is even when the answer is everyone.
+ * Omitting a visibility field is how an article ends up more visible than anyone intended,
+ * and the point of a nullable required field is that `null` is a decision a model had to make
+ * rather than a default it inherited.
+ *
+ * `locale` is required by Zendesk, and the reason it is worth being careful about is not that
+ * a wrong one errors — it does not. It files the article against a language nobody is reading,
+ * where it looks created and is invisible. Nothing here checks the value beyond it being
+ * present, because the mistake worth catching is a well-formed locale that is not one this
+ * Help Center serves, and this server has no way to know which those are.
+ *
+ * `draft` is absent, and `create_article` sends `draft: true` itself — see
+ * `ArticleCreatePayload`. `section_id` is absent too, because an article is created inside a
+ * section and Zendesk takes that id in the URL, so `create_article` carries it on its own
+ * schema and splits it off at the call.
+ */
+export const createArticleSchema = {
+	...articleContentSchema,
+	locale: z
+		.string()
+		.min(1)
+		.describe(
+			'Locale the article is written in, lowercase and hyphenated, e.g. en-us. It must be one this Help Center has enabled — a locale Zendesk accepts but nobody reads files the article out of sight rather than failing'
+		),
+	permission_group_id: z
+		.number()
+		.int()
+		.describe('ID of the permission group deciding who may edit and publish this article'),
+	user_segment_id: z
+		.number()
+		.int()
+		.nullable()
+		.describe(
+			'ID of the user segment deciding who may see this article, or null to make it visible to everyone. Required rather than optional, because who can read an article is not something to leave to a default'
+		),
+}
+
+/**
+ * What an existing article may have changed: what it says and where it sits, and nothing else.
+ *
+ * `draft` is not here, and could not be even if we wanted it. Zendesk marks the field
+ * read-only on update and publishes an article through the translation instead —
+ * `PUT /help_center/articles/{id}/translations/{locale}` with `{ translation: { draft: false } }`
+ * — which is an endpoint this client has no method for. So publishing stays a human action by
+ * two separate mechanisms, and adding a translation method would quietly undo one of them.
+ *
+ * `label_names` is worded as the complete list rather than the labels to add. Zendesk does not
+ * document which it does, and the wording is chosen to be correct either way: a caller sending
+ * every label is right whether the field replaces the set or merges into it, where a caller
+ * sending only the new one is right in just one of those cases.
+ */
+export const updateArticleSchema = {
+	...z.object(articleContentSchema).partial().shape,
+	// Unwrapped before it is described, because this field is already optional in the shape
+	// above and a description set on the optional would be discarded by the unwrap. The
+	// business rule shapes describe first because their equivalents are required.
+	label_names: articleContentSchema.label_names
+		.unwrap()
+		.describe(
+			"The article's complete label list. Read the article with get_article first and send all of its labels rather than only the new ones, since sending a partial list may drop the rest"
+		)
+		.optional(),
+}
+
+/**
+ * The create payload carries `draft: true` in the type rather than by convention, for the
+ * reason `TriggerCreatePayload` carries `active: false`: the schema never accepts the field,
+ * so it can only come from the handler, and stating it here means a handler that forgets it
+ * stops compiling instead of quietly publishing to a customer-facing page.
+ */
+export type ArticleCreatePayload = InferParams<typeof createArticleSchema> & { draft: true }
+export type ArticleUpdatePayload = InferParams<typeof updateArticleSchema>
+
+/**
  * What `support_info` answers with.
  *
  * Every field is nullable because the whole point of the tool is to be called when something

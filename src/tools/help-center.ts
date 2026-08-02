@@ -1,6 +1,12 @@
 import { z } from 'zod'
 import type { ToolDefinition } from '../types/zendesk'
-import { paginationSchema, sortingSchema, idSchema } from '../types/zendesk'
+import {
+	paginationSchema,
+	sortingSchema,
+	idSchema,
+	createArticleSchema,
+	updateArticleSchema,
+} from '../types/zendesk'
 import { createTool } from '../utils/tool-registry'
 import { executeSearchWithStandardizedResponse } from '../utils/search-response'
 import { isRecord } from '../utils/narrow'
@@ -465,5 +471,41 @@ export const helpCenterTools: ToolDefinition[] = [
 			const { section_id, ...otherParams } = params
 			return client.listArticlesBySection(section_id, otherParams)
 		}
+	),
+
+	// The two writes, which `WRITE_TOOLS_ENABLED` in utils/tool-registry deliberately does not
+	// name, so no client is offered them yet. An article is the only thing these tools can build
+	// that a customer reads directly rather than an agent, and the draft flag is what makes that
+	// safe: a draft is invisible to end users, `create_article` forces one, and neither tool can
+	// publish. See `createArticleSchema` for the rest of that argument.
+	createTool(
+		'create_article',
+		'Create a Help Center article inside a section. It is created as a draft, so no customer can see it until a human publishes it from the Zendesk UI.',
+		{
+			section_id: idSchema.describe('ID of the section to create the article in'),
+			...createArticleSchema,
+		},
+		async (client, { section_id, ...article }) => {
+			return client.createArticle({ ...article, draft: true }, section_id)
+		},
+		'Article created successfully, as a draft. No customer can see it until someone publishes it in the Zendesk UI.'
+	),
+
+	createTool(
+		'update_article',
+		"Update a Help Center article's content. Any field left out keeps its current value. This cannot publish a draft, and cannot change who is allowed to see the article.",
+		{ id: idSchema.describe('Article ID to update'), ...updateArticleSchema },
+		async (client, { id, ...changes }) => {
+			// Zendesk accepts an empty update and changes nothing, which reads as success. Say what
+			// happened instead, since a model that sent no fields meant to send some.
+			if (Object.keys(changes).length === 0) {
+				throw new Error(
+					`update_article needs at least one field to change: ${Object.keys(updateArticleSchema).join(', ')}.`
+				)
+			}
+
+			return client.updateArticle(id, changes)
+		},
+		'Article updated successfully!'
 	),
 ]
