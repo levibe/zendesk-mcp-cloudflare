@@ -1,7 +1,3 @@
-/**
- * Reshapes what `/users/me.json` returns into the answer `support_info` is actually asked for
- */
-
 import type { SupportInfo } from '../types/zendesk'
 import { isRecord } from './narrow'
 

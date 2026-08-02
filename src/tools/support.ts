@@ -1,7 +1,3 @@
-/**
- * Core support functionality tools for fundamental Zendesk Support operations
- */
-
 import type { ToolDefinition } from '../types/zendesk'
 import { createTool } from '../utils/tool-registry'
 import { summarizeCurrentUser } from '../utils/support-response'

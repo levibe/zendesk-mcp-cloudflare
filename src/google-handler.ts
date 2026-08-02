@@ -80,21 +80,16 @@ async function redirectToGoogle(
 }
 
 /**
- * OAuth Callback Endpoint
- *
- * This route handles the callback from Google after user authentication.
- * It exchanges the temporary code for an access token, then stores some
- * user metadata & the auth token as part of the 'props' on the token passed
- * down to the client. It ends by redirecting the client back to _its_ callback URL
+ * Exchanges Google's code for an access token, completes the authorization, and redirects the
+ * client back to its own callback. What goes into `props` is encrypted into the access token
+ * and is what a tool can later read through `getMcpAuthContext()` — see `Props` in ../utils.
  */
 app.get('/callback', async (c) => {
-	// Get the oathReqInfo out of KV
 	const oauthReqInfo = JSON.parse(atob(c.req.query('state') as string)) as AuthRequest
 	if (!oauthReqInfo.clientId) {
 		return c.text('Invalid state', 400)
 	}
 
-	// Exchange the code for an access token
 	const code = c.req.query('code')
 	if (!code) {
 		return c.text('Missing code', 400)
@@ -112,7 +107,6 @@ app.get('/callback', async (c) => {
 		return googleErrResponse
 	}
 
-	// Fetch the user info from Google
 	const userResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
 		headers: {
 			Authorization: `Bearer ${accessToken}`,
@@ -128,12 +122,10 @@ app.get('/callback', async (c) => {
 		email: string
 	}
 
-	// Enforce domain restriction if HOSTED_DOMAIN is set
 	if (c.env.HOSTED_DOMAIN && !email.endsWith(`@${c.env.HOSTED_DOMAIN}`)) {
 		return c.text(`Access restricted to ${c.env.HOSTED_DOMAIN} domain users only`, 403)
 	}
 
-	// Return back to the MCP client a new token
 	const { redirectTo } = await c.env.OAUTH_PROVIDER.completeAuthorization({
 		metadata: {
 			label: name,

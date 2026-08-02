@@ -1,9 +1,3 @@
-/**
- * Centralized Zendesk API client with authentication and request handling
- * Compatible with Cloudflare Workers environment
- * Provides methods for all major Zendesk API endpoints across Support, Talk, Chat, and Guide
- */
-
 import type { MacroCreatePayload, MacroUpdatePayload } from './types/zendesk'
 
 interface ZendeskClientConfig {
@@ -86,8 +80,6 @@ function parseRetryAfter(header: string | null): number | undefined {
  * Statuses where Zendesk is asking to be called back rather than refusing the request.
  *
  * 408 is in because it means the request timed out on their side and is worth sending again.
- * The old classifier retried it only when the body happened to contain the word "timeout",
- * so an empty-bodied 408 was dropped — the inconsistency is the bug, not the retry.
  *
  * 500 is out, for the opposite reason: it is a fault that will fail the same way on a second
  * attempt. 502, 503 and 504 mean the request never reached a healthy backend at all.
@@ -196,17 +188,15 @@ export class ZendeskClient {
 	private apiToken: string
 
 	constructor(config?: ZendeskClientConfig, env?: ZendeskEnv) {
-		// Load Zendesk credentials from config, environment, or Cloudflare Workers env
 		this.subdomain = config?.subdomain || env?.ZENDESK_SUBDOMAIN || ''
 		this.email = config?.email || env?.ZENDESK_EMAIL || ''
 		this.apiToken = config?.apiToken || env?.ZENDESK_API_TOKEN || ''
 
-		// Validate and sanitize subdomain to prevent injection
 		if (this.subdomain) {
 			this.subdomain = this.sanitizeSubdomain(this.subdomain)
 		}
 
-		// Warn if credentials are missing (but allow instantiation for testing)
+		// Warned rather than thrown so a test can build a client without credentials.
 		if (!this.subdomain || !this.email || !this.apiToken) {
 			console.warn(
 				'Zendesk credentials not found. Please set ZENDESK_SUBDOMAIN, ZENDESK_EMAIL, and ZENDESK_API_TOKEN.'
@@ -214,10 +204,7 @@ export class ZendeskClient {
 		}
 	}
 
-	/**
-	 * Sanitize subdomain to prevent injection attacks
-	 * Only allows alphanumeric characters, hyphens, and underscores
-	 */
+	/** The subdomain reaches a hostname, so anything outside `[a-zA-Z0-9-_]` is dropped. */
 	private sanitizeSubdomain(subdomain: string): string {
 		const sanitized = subdomain.replace(/[^a-zA-Z0-9-_]/g, '')
 		if (sanitized !== subdomain) {
@@ -226,19 +213,12 @@ export class ZendeskClient {
 		return sanitized
 	}
 
-	/**
-	 * Validate and sanitize endpoint path to prevent path traversal
-	 */
+	/** Strips path traversal, so an id reaching the path cannot climb out of the API root. */
 	private sanitizeEndpoint(endpoint: string): string {
-		// Remove any attempts at path traversal
 		const sanitized = endpoint.replace(/\.\./g, '').replace(/\/\//g, '/')
-		// Ensure endpoint starts with /
 		return sanitized.startsWith('/') ? sanitized : `/${sanitized}`
 	}
 
-	/**
-	 * Validate numeric IDs to prevent injection
-	 */
 	private validateId(id: number): number {
 		if (!Number.isInteger(id) || id <= 0) {
 			throw new Error(`Invalid ID: ${id}. ID must be a positive integer.`)
@@ -246,23 +226,16 @@ export class ZendeskClient {
 		return id
 	}
 
-	// Construct the base URL for Zendesk API v2 endpoints
 	private getBaseUrl(): string {
 		return `https://${this.subdomain}.zendesk.com/api/v2`
 	}
 
-	// Generate Basic Authentication header using email/token format
 	private getAuthHeader(): string {
-		// Use Web API btoa instead of Node.js Buffer
 		const credentials = `${this.email}/token:${this.apiToken}`
 		const encoded = btoa(credentials)
 		return `Basic ${encoded}`
 	}
 
-	/**
-	 * Core HTTP request method with authentication and error handling
-	 * Uses fetch API compatible with Cloudflare Workers
-	 */
 	async request(
 		method: string,
 		endpoint: string,
@@ -270,29 +243,25 @@ export class ZendeskClient {
 		params?: Record<string, unknown>,
 		timeoutMs = DEFAULT_TIMEOUT_MS
 	): Promise<unknown> {
-		// Above the try on purpose. Everything inside it is rewrapped as a ZendeskRequestError,
-		// and one of those carrying no status is how the retry policy recognises a request that
-		// never got an answer — which is worth sending again. A missing credential is not that.
-		// It will be just as missing on the third attempt, so leaving this inside would buy
-		// three seconds of backoff and the identical failure.
+		// Everything down to the `try` sits outside it on purpose, and where the try starts is
+		// the point rather than a detail of layout. The catch rewraps whatever it sees as a
+		// ZendeskRequestError, and one of those carrying no status is how the retry policy
+		// recognises a request that went out and got nothing back — which is worth sending
+		// again. None of the preparation here is that, and several parts of it can throw: a
+		// missing credential below, `btoa` on a token pasted with a smart quote (it rejects
+		// anything outside Latin-1), `JSON.stringify` on a body it cannot serialize. Leaving as
+		// plain Errors is what stops those being retried: the classifier finds no
+		// ZendeskRequestError in the chain and gives up on the first attempt. Moved inside the
+		// try, each would instead be sent twice more and fail identically both times, for three
+		// seconds of backoff and nothing else.
 		if (!this.subdomain || !this.email || !this.apiToken) {
 			throw new Error('Zendesk credentials not configured. Please set environment variables.')
 		}
 
-		// Preparing the request happens outside the try, and where the try starts is the whole
-		// point rather than a detail of layout. What it does is rewrap whatever it catches as a
-		// ZendeskRequestError, and one of those carrying no status is how the retry policy
-		// recognises a request that went out and got nothing back. None of the work below is
-		// that, and some of it can throw: `btoa` rejects any credential containing a character
-		// outside Latin-1, which is what a token pasted with a smart quote looks like, and
-		// JSON.stringify rejects a body it cannot serialize. Both fail identically on the third
-		// attempt. Leaving here as plain Errors is what tells the classifier no request was
-		// ever made — the same reason the credentials check above sits where it does.
 		const sanitizedEndpoint = this.sanitizeEndpoint(endpoint)
 
 		const url = new URL(`${this.getBaseUrl()}${sanitizedEndpoint}`)
 
-		// Add query parameters if provided
 		if (params) {
 			Object.entries(params).forEach(([key, value]) => {
 				if (value !== undefined && value !== null) {
@@ -307,7 +276,6 @@ export class ZendeskClient {
 			Accept: 'application/json',
 		}
 
-		// Only include body for non-GET requests
 		const body =
 			method !== 'GET' && data !== null && data !== undefined ? JSON.stringify(data) : undefined
 
@@ -372,7 +340,8 @@ export class ZendeskClient {
 				)
 			}
 
-			// Handle empty responses (e.g., from DELETE requests)
+			// A success without a JSON content type has no body worth parsing. An empty DELETE
+			// is the case that matters, since it answers with no content type at all.
 			const contentType = response.headers.get('content-type')
 			if (contentType && contentType.includes('application/json')) {
 				try {
@@ -417,8 +386,6 @@ export class ZendeskClient {
 	}
 
 	/**
-	 * Check if an error is retryable (transient failure)
-	 *
 	 * Classification reads the status and nothing else, and never the message text. The
 	 * message is built out of the Zendesk response body, so matching on it cannot tell a 502
 	 * that happened from a 502 the body merely quotes.
@@ -458,9 +425,6 @@ export class ZendeskClient {
 	}
 
 	/**
-	 * Request with automatic retry for transient failures
-	 * Uses exponential backoff for retry delays
-	 *
 	 * One deadline governs the call. Attempts fit inside it rather than each starting a fresh
 	 * timeout, because what a caller cares about is how long until it hears back, not how long
 	 * any individual attempt was allowed to run.
@@ -485,7 +449,6 @@ export class ZendeskClient {
 			} catch (error) {
 				lastError = error as Error
 
-				// Don't retry if this is the last attempt or error is not retryable
 				if (attempt === maxRetries - 1 || !this.isRetryableError(error)) {
 					throw error
 				}

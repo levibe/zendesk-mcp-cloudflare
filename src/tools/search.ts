@@ -1,7 +1,3 @@
-/**
- * Search tools for searching across Zendesk data
- */
-
 import { z } from 'zod'
 import type { ToolDefinition } from '../types/zendesk'
 import { sortingSchema } from '../types/zendesk'
@@ -24,7 +20,6 @@ export const searchTools: ToolDefinition[] = [
 		async (client, params) => {
 			const { query, type, ...searchParams } = params
 
-			// Build the search query with type filter if specified
 			let searchQuery = query
 			if (type) {
 				searchQuery = `type:${type} ${query}`

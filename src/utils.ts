@@ -1,15 +1,3 @@
-/**
- * Constructs an authorization URL for an upstream service.
- *
- * @param {Object} options
- * @param {string} options.upstream_url - The base URL of the upstream service.
- * @param {string} options.client_id - The client ID of the application.
- * @param {string} options.redirect_uri - The redirect URI of the application.
- * @param {string} [options.state] - The state parameter.
- * @param {string} [options.hosted_domain] - The hosted domain parameter.
- *
- * @returns {string} The authorization URL.
- */
 export function getUpstreamAuthorizeUrl({
 	upstreamUrl,
 	clientId,
@@ -35,19 +23,7 @@ export function getUpstreamAuthorizeUrl({
 	return upstream.href
 }
 
-/**
- * Fetches an authorization token from an upstream service.
- *
- * @param {Object} options
- * @param {string} options.client_id - The client ID of the application.
- * @param {string} options.client_secret - The client secret of the application.
- * @param {string} options.code - The authorization code.
- * @param {string} options.redirect_uri - The redirect URI of the application.
- * @param {string} options.upstream_url - The token endpoint URL of the upstream service.
- * @param {string} options.grant_type - The grant type.
- *
- * @returns {Promise<[string, null] | [null, Response]>} A promise that resolves to an array containing the access token or an error response.
- */
+/** Resolves to `[token, null]` on success and `[null, response]` with the error to return. */
 export async function fetchUpstreamAuthToken({
 	clientId,
 	clientSecret,

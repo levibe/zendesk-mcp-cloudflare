@@ -1,8 +1,4 @@
 /**
- * Narrowing helpers for values arriving from outside the type system
- */
-
-/**
  * Narrows a value to something whose properties can be read.
  *
  * The Zendesk client returns `unknown`, which is honest — it has no idea what came back —
