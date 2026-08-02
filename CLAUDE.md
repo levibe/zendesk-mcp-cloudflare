@@ -162,6 +162,14 @@ Anything satisfying neither is withheld at registration and cannot be reached by
 
 Both rules are allowlists rather than denylists on purpose, so a newly added tool stays unexposed until somebody classifies it deliberately. That is why permitting a write means adding its name to the set, and why adding `create_` to the prefixes above would be the wrong shortcut — a prefix publishes every future create tool on the day it is written, which inverts the property the rule exists to hold.
 
+### A business rule this server builds can never be running
+
+The trigger and automation writes carry a second guardrail that has nothing to do with the allowlist, and it is the reason they were safe to write before anyone decided to publish them. Neither `createTriggerSchema` nor `createAutomationSchema` accepts `active`, and the two create handlers send `active: false` themselves — Zendesk defaults a new rule to active, so leaving the field out would have built a live one. The update shapes leave `active` out for the same reason, which is the half that makes the other half mean anything: a rule that could be created dormant and enabled by the next call was never dormant. Turning one on is a human action in the Zendesk UI, and this server offers no way to do it.
+
+`TriggerCreatePayload` and `AutomationCreatePayload` intersect their inferred shape with `{ active: false }` so the compiler holds that rather than a reviewer. A handler passing its validated parameters straight through stops type-checking.
+
+The notification actions — everything named `notification_*`, plus `tweet_requester` and `satisfaction_score` — are refused by `businessRuleActionSchema`. That one is a denylist, which is the opposite shape from the allowlists above, and the difference is worth keeping rather than tidying. Tool names are ours and finite, so an allowlist works there. Action fields are Zendesk's and are not: a custom field action is `custom_fields_12345`, so any allowlist wide enough to accept one accepts anything. The prefix does the work, and a notification action Zendesk names some other way would get through — which is precisely why it is not the only control.
+
 ## Testing
 
 ### Unit Tests

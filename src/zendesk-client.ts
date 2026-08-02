@@ -1,4 +1,11 @@
-import type { MacroCreatePayload, MacroUpdatePayload } from './types/zendesk'
+import type {
+	AutomationCreatePayload,
+	AutomationUpdatePayload,
+	MacroCreatePayload,
+	MacroUpdatePayload,
+	TriggerCreatePayload,
+	TriggerUpdatePayload,
+} from './types/zendesk'
 
 interface ZendeskClientConfig {
 	subdomain?: string
@@ -821,11 +828,11 @@ export class ZendeskClient {
 		return this.send('GET', `/triggers/${id}.json`)
 	}
 
-	async createTrigger(data: any) {
+	async createTrigger(data: TriggerCreatePayload) {
 		return this.send('POST', '/triggers.json', { trigger: data })
 	}
 
-	async updateTrigger(id: number, data: any) {
+	async updateTrigger(id: number, data: TriggerUpdatePayload) {
 		this.validateId(id)
 		return this.send('PUT', `/triggers/${id}.json`, { trigger: data })
 	}
@@ -845,11 +852,11 @@ export class ZendeskClient {
 		return this.send('GET', `/automations/${id}.json`)
 	}
 
-	async createAutomation(data: any) {
+	async createAutomation(data: AutomationCreatePayload) {
 		return this.send('POST', '/automations.json', { automation: data })
 	}
 
-	async updateAutomation(id: number, data: any) {
+	async updateAutomation(id: number, data: AutomationUpdatePayload) {
 		this.validateId(id)
 		return this.send('PUT', `/automations/${id}.json`, { automation: data })
 	}
