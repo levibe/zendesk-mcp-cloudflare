@@ -17,8 +17,10 @@
  *
  * Which metrics each module pins, and why:
  *
- * - The three utils and the OAuth handler are wholly covered, so they pin all
- *   four. Any drop is a regression rather than a rounding artefact.
+ * - Two of the utils and the OAuth handler are wholly covered, so they pin all
+ *   four. Any drop is a regression rather than a rounding artefact. The search
+ *   response helper is the exception: it pins the other three at 100 and holds
+ *   branches lower, because its reshaping has arms no fixture has reached yet.
  * - The client and the hierarchy walk pin branches alone. Their statement counts
  *   are held down by a long tail of thin methods, so a floor there would move
  *   whenever a method was added rather than when a decision stopped being
