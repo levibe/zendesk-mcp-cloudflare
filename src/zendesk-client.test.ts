@@ -43,6 +43,24 @@ const stubFetch = (respond: (url: string, init: SentRequest) => Promise<Response
 const urlOf = (fetchMock: ReturnType<typeof stubFetch>, call = 0) => fetchMock.mock.calls[call][0]
 const sent = (fetchMock: ReturnType<typeof stubFetch>, call = 0) => fetchMock.mock.calls[call][1]
 
+/**
+ * A request that never answers, rejecting the way fetch does once its signal is aborted.
+ *
+ * Both Node and workerd reject with a DOMException rather than a renamed Error, and that it
+ * is an Error at all is what lets causeChain walk to it, so the real type is pinned here.
+ * The wording is workerd's, taken from a probe against the runtime rather than guessed —
+ * note it has no trailing full stop, where Node's does.
+ */
+const stubUnanswered = () =>
+	stubFetch(
+		(_url, init) =>
+			new Promise<Response>((_resolve, reject) => {
+				init.signal.addEventListener('abort', () => {
+					reject(new DOMException('The operation was aborted', 'AbortError'))
+				})
+			})
+	)
+
 /** Advances past both backoff waits — 1s after the first failure, 2s after the second. */
 const drainBackoff = () => vi.advanceTimersByTimeAsync(3000)
 
@@ -283,26 +301,12 @@ describe('request', () => {
 })
 
 describe('the 30 second timeout', () => {
-	/** Never answers; rejects the way fetch does once its signal is aborted. */
-	const stubUnanswered = () =>
-		stubFetch(
-			(_url, init) =>
-				new Promise<Response>((_resolve, reject) => {
-					init.signal.addEventListener('abort', () => {
-						// Both Node and workerd reject with a DOMException, not a renamed Error. That it
-						// is an Error at all is what lets causeChain walk to it, so pin the real type.
-						const aborted = new DOMException('The operation was aborted.', 'AbortError')
-						reject(aborted)
-					})
-				})
-		)
-
 	it('aborts a request that has not answered', async () => {
 		stubUnanswered()
 
 		const attempt = client.request('GET', '/tickets.json')
 		const rejects = expect(attempt).rejects.toThrow(
-			'Zendesk request failed: The operation was aborted.'
+			'Zendesk request failed: The operation was aborted'
 		)
 
 		await vi.advanceTimersByTimeAsync(29_999)
@@ -468,38 +472,72 @@ describe('requestWithRetry', () => {
 		expect(fetchMock).toHaveBeenCalledTimes(1)
 	})
 
-	// This was #17. The AbortError is two links down the chain once `request` has rewrapped
-	// it, which is why the classifier walks `cause` rather than looking only at what it was
-	// handed. The step-by-step advance is the point of the test as much as the count is: a
-	// hung endpoint now costs three 30s waits plus the backoff before it gives up.
-	it('retries a request the 30 second timeout aborted', async () => {
-		const fetchMock = stubFetch(
-			(_url, init) =>
-				new Promise<Response>((_resolve, reject) => {
-					init.signal.addEventListener('abort', () => {
-						// Both Node and workerd reject with a DOMException, not a renamed Error. That it
-						// is an Error at all is what lets causeChain walk to it, so pin the real type.
-						const aborted = new DOMException('The operation was aborted.', 'AbortError')
-						reject(aborted)
-					})
+	// This was #17, and it inverted with #32. It used to advance step by step through three
+	// 30s attempts and two backoffs, roughly 93 seconds, precisely so the cost was visible.
+	// The deadline covers the whole call now, so a hung endpoint spends it on the first
+	// attempt and there is nothing left to retry into — 30 seconds, as it was before #24 made
+	// retrying a timeout possible. The AbortError is still two links down the chain, which is
+	// why the classifier walks `cause` rather than reading only what it was handed.
+	it('does not retry a hung request, because one attempt spends the whole deadline', async () => {
+		const fetchMock = stubUnanswered()
+
+		const attempt = client.requestWithRetry('GET', '/tickets.json')
+		const rejects = expect(attempt).rejects.toThrow('The operation was aborted')
+
+		await vi.advanceTimersByTimeAsync(30_000)
+		await rejects
+
+		expect(fetchMock).toHaveBeenCalledTimes(1)
+		expect(vi.getTimerCount()).toBe(0)
+	})
+
+	// The second attempt inherits what is left rather than starting its own 30 seconds, so
+	// the whole call still lands on the deadline instead of at 61 seconds.
+	it('gives a later attempt only the time the deadline has left', async () => {
+		let calls = 0
+		const fetchMock = stubFetch((_url, init) => {
+			calls += 1
+			if (calls === 1) return Promise.resolve(failedResponse(503, 'unavailable'))
+			return new Promise<Response>((_resolve, reject) => {
+				init.signal.addEventListener('abort', () => {
+					reject(new DOMException('The operation was aborted', 'AbortError'))
 				})
+			})
+		})
+
+		const attempt = client.requestWithRetry('GET', '/tickets.json')
+		const rejects = expect(attempt).rejects.toThrow('The operation was aborted')
+
+		await vi.advanceTimersByTimeAsync(1_000) // backoff, then the second attempt starts
+		expect(fetchMock).toHaveBeenCalledTimes(2)
+
+		// 29s more reaches the deadline, not 30 — the second attempt started a second late.
+		await vi.advanceTimersByTimeAsync(28_999)
+		await vi.advanceTimersByTimeAsync(1)
+		await rejects
+
+		expect(fetchMock).toHaveBeenCalledTimes(2)
+		expect(vi.getTimerCount()).toBe(0)
+	})
+
+	// The decision is taken before the sleep rather than after it. Waiting out a backoff only
+	// to send a request that gets aborted on arrival spends the one thing the caller is short
+	// of, and reports the failure a second later than it was already known.
+	it('stops instead of sleeping into a retry the deadline cannot fit', async () => {
+		const fetchMock = stubFetch(
+			() =>
+				new Promise<Response>((resolve) =>
+					setTimeout(() => resolve(failedResponse(503, 'unavailable')), 29_000)
+				)
 		)
 
 		const attempt = client.requestWithRetry('GET', '/tickets.json')
-		const rejects = expect(attempt).rejects.toThrow('The operation was aborted.')
+		const rejects = expect(attempt).rejects.toThrow('Zendesk API Error: 503')
 
-		await vi.advanceTimersByTimeAsync(30_000) // first attempt times out
-		expect(fetchMock).toHaveBeenCalledTimes(1)
-
-		await vi.advanceTimersByTimeAsync(1_000) // backoff, then the second attempt starts
-		await vi.advanceTimersByTimeAsync(30_000)
-		expect(fetchMock).toHaveBeenCalledTimes(2)
-
-		await vi.advanceTimersByTimeAsync(2_000)
-		await vi.advanceTimersByTimeAsync(30_000)
-		expect(fetchMock).toHaveBeenCalledTimes(3)
-
+		await vi.advanceTimersByTimeAsync(29_000)
 		await rejects
+
+		expect(fetchMock).toHaveBeenCalledTimes(1)
 		expect(vi.getTimerCount()).toBe(0)
 	})
 

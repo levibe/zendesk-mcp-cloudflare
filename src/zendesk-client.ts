@@ -51,6 +51,37 @@ export class ZendeskRequestError extends Error {
  */
 const RETRYABLE_STATUSES = new Set([408, 429, 502, 503, 504])
 
+/** How long a single `request` waits for an answer when nothing narrower bounds it. */
+const DEFAULT_TIMEOUT_MS = 30_000
+
+/**
+ * How long a whole `requestWithRetry` call gets — every attempt and every backoff together.
+ *
+ * Set to the same figure as one attempt, which keeps the worst case exactly where it already
+ * was: a caller never waits longer than it does today. Before #24 that was also the real
+ * worst case, because a timed-out request was never retried; #24 fixed the classifier and
+ * the arithmetic followed it to three attempts and two backoffs, about 93 seconds. That is
+ * longer than most clients will wait, so the likely outcome was the caller giving up first
+ * and the remaining attempts running for nobody.
+ *
+ * What this buys is that retries stop costing wall-clock time the caller can feel. The case
+ * they exist for still works: a 503 answered in 200ms gets all three attempts inside four
+ * seconds. What they no longer do is stack full-length timeouts — a genuinely hung endpoint
+ * spends the budget on its first attempt and fails at 30 seconds, which is what it did
+ * before retrying timeouts was possible at all.
+ */
+const TOTAL_TIMEOUT_MS = 30_000
+
+/**
+ * The smallest window worth starting an attempt in.
+ *
+ * Without it, "does another attempt fit" is answered after the fact: the loop sleeps through
+ * its backoff, starts a request with 40 milliseconds left, and that request is aborted on
+ * arrival. A second is a low bar, and clearing it is not a promise the attempt will finish —
+ * only that it was not doomed before it was sent.
+ */
+const MINIMUM_ATTEMPT_MS = 1_000
+
 /**
  * Yields an error and then each `cause` beneath it. `request` rewraps whatever it caught, so
  * the failure worth classifying is usually a link or two down rather than in hand — and fetch
@@ -143,7 +174,8 @@ export class ZendeskClient {
 		method: string,
 		endpoint: string,
 		data?: unknown,
-		params?: Record<string, unknown>
+		params?: Record<string, unknown>,
+		timeoutMs = DEFAULT_TIMEOUT_MS
 	): Promise<unknown> {
 		// Above the try on purpose. Everything inside it is rewrapped as a ZendeskRequestError,
 		// and one of those carrying no status is how the retry policy recognises a request that
@@ -181,9 +213,11 @@ export class ZendeskClient {
 				Accept: 'application/json',
 			}
 
-			// Create AbortController for timeout (compatible with all Workers versions)
+			// Create AbortController for timeout (compatible with all Workers versions).
+			// `timeoutMs` is whatever the caller has left rather than a fresh 30 seconds, so a
+			// retried attempt cannot extend the total past the deadline that governs the call.
 			const abortController = new AbortController()
-			const timeoutId = setTimeout(() => abortController.abort(), 30000)
+			const timeoutId = setTimeout(() => abortController.abort(), timeoutMs)
 
 			const requestInit: RequestInit = {
 				method,
@@ -290,6 +324,14 @@ export class ZendeskClient {
 	/**
 	 * Request with automatic retry for transient failures
 	 * Uses exponential backoff for retry delays
+	 *
+	 * One deadline governs the call. Attempts fit inside it rather than each starting a fresh
+	 * timeout, because what a caller cares about is how long until it hears back, not how long
+	 * any individual attempt was allowed to run.
+	 *
+	 * `maxRetries` stays, but it is no longer the interesting bound. It caps the loop when
+	 * failures arrive instantly and the deadline would otherwise permit a great many of them;
+	 * the deadline is what decides in every case where an attempt takes real time.
 	 */
 	async requestWithRetry(
 		method: string,
@@ -298,11 +340,12 @@ export class ZendeskClient {
 		params?: Record<string, unknown>,
 		maxRetries = 3
 	): Promise<unknown> {
+		const deadline = Date.now() + TOTAL_TIMEOUT_MS
 		let lastError: Error | undefined
 
 		for (let attempt = 0; attempt < maxRetries; attempt++) {
 			try {
-				return await this.request(method, endpoint, data, params)
+				return await this.request(method, endpoint, data, params, deadline - Date.now())
 			} catch (error) {
 				lastError = error as Error
 
@@ -313,6 +356,21 @@ export class ZendeskClient {
 
 				// Calculate exponential backoff delay: 1s, 2s, 4s (capped at 5s)
 				const delay = Math.min(1000 * Math.pow(2, attempt), 5000)
+
+				// Decide whether the next attempt fits before sleeping, rather than sleeping and
+				// then discovering it does not. Waiting out a backoff only to send a request the
+				// deadline aborts on arrival wastes the one thing the caller is short of.
+				if (Date.now() + delay + MINIMUM_ATTEMPT_MS > deadline) {
+					console.warn(
+						`Request failed (attempt ${attempt + 1}/${maxRetries}) and the ${TOTAL_TIMEOUT_MS}ms deadline leaves no room to retry`,
+						{
+							error: error instanceof Error ? error.message : String(error),
+							method,
+							endpoint,
+						}
+					)
+					throw error
+				}
 
 				console.warn(
 					`Request failed (attempt ${attempt + 1}/${maxRetries}), retrying in ${delay}ms...`,
