@@ -31,6 +31,20 @@ const jsonResponse = (body: unknown) =>
 
 const failedResponse = (status: number, body: string) => new Response(body, { status })
 
+/**
+ * A response whose status arrives but whose body does not. The headers are in hand and the
+ * stream then errors, which is how a connection dropped mid-body reaches the client.
+ */
+const unreadableResponse = (status: number) =>
+	new Response(
+		new ReadableStream({
+			start(controller) {
+				controller.error(new TypeError('body stream error'))
+			},
+		}),
+		{ status }
+	)
+
 const redirectResponse = (status: number, location?: string) =>
 	new Response(null, { status, headers: location ? { location } : {} })
 
@@ -514,7 +528,10 @@ describe('requestWithRetry', () => {
 
 		const failure = smartQuoted.requestWithRetry('GET', '/tickets.json')
 
-		await expect(failure).rejects.toThrow()
+		// Pinned by name rather than left at "something threw", so that an unrelated failure
+		// inside requestWithRetry cannot pass as this one. The name is the stable half of a
+		// DOMException across Node and workerd; the message wording is not.
+		await expect(failure).rejects.toHaveProperty('name', 'InvalidCharacterError')
 		await expect(failure).rejects.not.toBeInstanceOf(ZendeskRequestError)
 		expect(fetchMock).not.toHaveBeenCalled()
 		expect(vi.getTimerCount()).toBe(0)
@@ -546,6 +563,22 @@ describe('requestWithRetry', () => {
 
 		await expect(client.requestWithRetry('GET', '/tickets.json')).rejects.toThrow(
 			'Zendesk answered 200 with a body that is not valid JSON'
+		)
+
+		expect(fetchMock).toHaveBeenCalledTimes(1)
+	})
+
+	// The sibling of the case above, on the failure branch rather than the success one, and
+	// the one that got missed. A body is a stream, so reading it can fail after the status is
+	// already in hand. Letting that propagate would hand the outer catch a plain Error, which
+	// it rewraps carrying no status — and the rule below reads a statusless error as a request
+	// that never got an answer, so a flatly refused 400 would go out twice more. Asserting on
+	// the count is the point; the message only shows the status survived to be reported.
+	it('does not retry a 400 whose body cannot be read', async () => {
+		const fetchMock = stubFetch(async () => unreadableResponse(400))
+
+		await expect(client.requestWithRetry('GET', '/tickets.json')).rejects.toThrow(
+			'Zendesk API Error: 400'
 		)
 
 		expect(fetchMock).toHaveBeenCalledTimes(1)

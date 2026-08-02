@@ -351,7 +351,20 @@ export class ZendeskClient {
 			}
 
 			if (!response.ok) {
-				const errorText = await response.text()
+				// Reading the body is allowed to fail without taking the status down with it.
+				// A body arrives as a stream, so `text()` can reject after the headers are in
+				// hand — and letting that propagate would hand the outer catch a plain Error,
+				// which it rewraps carrying no status. The classifier reads a statusless error
+				// as a request that never got an answer, so a flatly refused 400 would be sent
+				// twice more on the strength of a body we could not read. The status is the
+				// part that decides, and it is already known here.
+				let errorText: string
+				try {
+					errorText = await response.text()
+				} catch {
+					errorText = '<the body could not be read>'
+				}
+
 				throw new ZendeskRequestError(
 					`Zendesk API Error: ${response.status} - ${errorText}`,
 					response.status,
