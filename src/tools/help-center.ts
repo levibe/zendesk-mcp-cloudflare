@@ -1,7 +1,3 @@
-/**
- * Help Center tools for managing knowledge base articles, categories, and sections
- */
-
 import { z } from 'zod'
 import type { ToolDefinition } from '../types/zendesk'
 import { paginationSchema, sortingSchema, idSchema } from '../types/zendesk'
@@ -76,7 +72,6 @@ export const helpCenterTools: ToolDefinition[] = [
 		}
 	),
 
-	// === CATEGORY TOOLS ===
 	createTool(
 		'list_categories',
 		'List Help Center categories to understand content hierarchy',
@@ -106,7 +101,6 @@ export const helpCenterTools: ToolDefinition[] = [
 			...paginationSchema,
 		},
 		async (client, params) => {
-			// Use general search with type filter for categories
 			return executeSearchWithStandardizedResponse(
 				() =>
 					client.search(`type:topic ${params.query}`, {
@@ -118,7 +112,6 @@ export const helpCenterTools: ToolDefinition[] = [
 		}
 	),
 
-	// === SECTION TOOLS ===
 	createTool(
 		'list_sections',
 		'List Help Center sections (optionally filtered by category)',
@@ -156,7 +149,6 @@ export const helpCenterTools: ToolDefinition[] = [
 			...paginationSchema,
 		},
 		async (client, params) => {
-			// Build search query
 			let searchQuery = `type:topic ${params.query}`
 			if (params.category_id) {
 				searchQuery += ` category:${params.category_id}`
@@ -173,7 +165,6 @@ export const helpCenterTools: ToolDefinition[] = [
 		}
 	),
 
-	// === HIERARCHY NAVIGATION TOOLS ===
 	createTool(
 		'get_help_center_hierarchy',
 		'Get the complete Help Center content hierarchy (categories > sections > articles)',
@@ -186,7 +177,6 @@ export const helpCenterTools: ToolDefinition[] = [
 		},
 		async (client, params) => {
 			try {
-				// Get categories
 				const categoriesResponse = params.category_id
 					? await client.getCategory(params.category_id)
 					: await client.listCategories()
@@ -198,7 +188,6 @@ export const helpCenterTools: ToolDefinition[] = [
 
 				const hierarchy = await Promise.all(
 					categories.map(async (category) => {
-						// Get sections for this category
 						const sectionsResponse = await client.listSectionsByCategory(category.id)
 						const sections = readEntities(sectionsResponse, 'sections')
 

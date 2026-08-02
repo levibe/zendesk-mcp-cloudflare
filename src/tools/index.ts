@@ -1,11 +1,8 @@
 /**
- * Centralized export of all Zendesk MCP tools
- * Provides organized tool categories for easy registration
- *
- * Defining a tool here does not publish it. Registration withholds every tool that writes
- * to Zendesk except the two macro writes it names, so the rest of the create, update and
- * delete tools below are compiled and tested but never offered to a client. See
- * isToolPublished in utils/tool-registry.
+ * Defining a tool here does not publish it. Registration withholds every write except the
+ * ones it names, so most of the create, update and delete tools below are compiled and
+ * tested but never offered to a client. `isToolPublished` in utils/tool-registry decides,
+ * and is the one place that says which writes are permitted.
  */
 
 import { ticketsTools } from './tickets'
@@ -22,7 +19,6 @@ import { supportTools } from './support'
 import { talkTools } from './talk'
 import { chatTools } from './chat'
 
-// Export individual tool categories
 export {
 	ticketsTools,
 	usersTools,
@@ -39,7 +35,6 @@ export {
 	chatTools,
 }
 
-// Export organized tool categories for bulk registration
 export const toolCategories = {
 	tickets: ticketsTools,
 	users: usersTools,
@@ -56,5 +51,4 @@ export const toolCategories = {
 	chat: chatTools,
 }
 
-// Export all tools as a flat array
 export const allTools = Object.values(toolCategories).flat()

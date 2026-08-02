@@ -1,7 +1,3 @@
-/**
- * Ticket management tools for creating, reading, updating, and deleting support tickets
- */
-
 import { z } from 'zod'
 import type { ToolDefinition } from '../types/zendesk'
 import {
@@ -16,7 +12,6 @@ import {
 import { createTool } from '../utils/tool-registry'
 import { executeSearchWithStandardizedResponse } from '../utils/search-response'
 
-// Ticket management tools
 export const ticketsTools: ToolDefinition[] = [
 	createTool(
 		'list_tickets',
@@ -100,7 +95,6 @@ export const ticketsTools: ToolDefinition[] = [
 		async (client, params) => {
 			const { query } = params
 
-			// Build the search query with filters
 			let searchQuery = `type:ticket ${query}`
 
 			if (params.status) searchQuery += ` status:${params.status}`

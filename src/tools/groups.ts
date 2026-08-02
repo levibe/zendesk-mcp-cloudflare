@@ -1,7 +1,3 @@
-/**
- * Agent group management tools for organizing support agents into teams
- */
-
 import type { ToolDefinition } from '../types/zendesk'
 import { paginationSchema, idSchema, nameSchema, descriptionSchema } from '../types/zendesk'
 import { createTool } from '../utils/tool-registry'

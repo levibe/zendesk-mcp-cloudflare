@@ -1,8 +1,3 @@
-/**
- * Tool registry utility for systematic registration of MCP tools
- * Provides a clean functional approach to tool registration
- */
-
 import type { McpServer } from '@modelcontextprotocol/server'
 import { z, type ZodRawShape } from 'zod'
 import type { ZendeskClient } from '../zendesk-client'
@@ -46,11 +41,7 @@ const WRITE_TOOLS_ENABLED = new Set(['create_macro', 'update_macro'])
 export const isToolPublished = (name: string): boolean =>
 	isReadOnlyTool(name) || WRITE_TOOLS_ENABLED.has(name)
 
-/**
- * Registers a collection of tools with the MCP server
- * Automatically applies error handling to each tool
- * Returns the names of any tools the registration policy withheld
- */
+/** Registers the tools this policy publishes, returning the names of those it withheld. */
 export const registerTools = (
 	server: McpServer,
 	client: ZendeskClient,
