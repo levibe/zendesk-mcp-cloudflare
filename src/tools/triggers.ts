@@ -1,7 +1,3 @@
-/**
- * Trigger automation tools for creating event-driven automated actions
- */
-
 import type { ToolDefinition } from '../types/zendesk'
 import { paginationSchema, idSchema } from '../types/zendesk'
 import { createTool } from '../utils/tool-registry'

@@ -1,7 +1,3 @@
-/**
- * User management tools for creating, reading, and managing end users and agents
- */
-
 import { z } from 'zod'
 import type { ToolDefinition } from '../types/zendesk'
 import {
@@ -15,7 +11,6 @@ import {
 import { createTool } from '../utils/tool-registry'
 import { executeSearchWithStandardizedResponse } from '../utils/search-response'
 
-// User management tools
 export const usersTools: ToolDefinition[] = [
 	createTool(
 		'list_users',
@@ -85,7 +80,6 @@ export const usersTools: ToolDefinition[] = [
 		async (client, params) => {
 			const { query } = params
 
-			// Build the search query with filters
 			let searchQuery = `type:user ${query}`
 
 			if (params.role) searchQuery += ` role:${params.role}`

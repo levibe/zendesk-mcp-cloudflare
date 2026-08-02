@@ -1,7 +1,3 @@
-/**
- * View management tools for creating and managing ticket filtering views
- */
-
 import type { ToolDefinition } from '../types/zendesk'
 import { paginationSchema, idSchema } from '../types/zendesk'
 import { createTool } from '../utils/tool-registry'
