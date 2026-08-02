@@ -129,6 +129,10 @@ describe('GET /callback', () => {
 			['it decodes to JSON null', btoa('null')],
 			['it decodes to a bare number', btoa('7')],
 			['it decodes to a bare string', btoa('"a string"')],
+			// `isRecord` tests only that the value is a non-null object, so an array satisfies it
+			// and the clientId check is what turns this one away. Worth a row of its own: tighten
+			// `isRecord` or reorder the checks and this is the case that moves.
+			['it decodes to an array', btoa('[]')],
 			['it parses but carries no clientId', btoa(JSON.stringify({ scope: ['profile'] }))],
 			['its clientId is not a string', btoa(JSON.stringify({ ...authRequest, clientId: 7 }))],
 			['its clientId is empty', btoa(JSON.stringify({ ...authRequest, clientId: '' }))],
@@ -171,6 +175,10 @@ describe('GET /callback', () => {
 	})
 
 	describe('the Google exchange', () => {
+		// These stay 500 while the guards above and below them answer a fixed 400, and the split is
+		// deliberate rather than a path this pass did not reach. A 400 says the caller sent
+		// something bad. Here the caller sent nothing wrong at all — Google refused us — so the
+		// status reports the dependency instead of blaming the request.
 		it('answers 500 when the token exchange fails', async () => {
 			vi.spyOn(console, 'log').mockImplementation(() => {})
 			tokenResponse = () => new Response('invalid_grant', { status: 400 })
@@ -373,8 +381,9 @@ describe('GET /callback', () => {
 	// The state is unsigned, so a hand-built one the server never minted completes the flow just
 	// as a genuine one does. This passing is the point: it records the CSRF property the comment
 	// on the handler describes, so that binding state to a session — which #20 forces — has to
-	// invert this test rather than quietly leave it passing. See that comment for why the impact
-	// is bounded today.
+	// invert this test rather than quietly leave it passing. #65 tracks the binding itself; #20
+	// is only what raises its impact. See the comment on the handler for why that impact is
+	// bounded today.
 	it('accepts a state the server never issued', async () => {
 		const forged = btoa(JSON.stringify({ ...authRequest, clientId: 'someone-elses-client' }))
 
