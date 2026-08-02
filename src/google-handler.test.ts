@@ -202,6 +202,39 @@ describe('GET /callback', () => {
 			expect(completeAuthorization).toHaveBeenCalledOnce()
 		})
 
+		// A domain is case-insensitive, so neither of these should turn a permitted user away.
+		// Google hands back a lowercase address in practice, which is why nobody was hitting
+		// this — an access control should not rest on a habit of the identity provider's.
+		it.each([
+			['an address Google sent in mixed case', 'Ada@EXAMPLE.COM', 'example.com'],
+			['a HOSTED_DOMAIN written in mixed case', 'ada@example.com', 'Example.COM'],
+			['both sides in mixed case', 'ADA@Example.com', 'EXAMPLE.com'],
+		])('admits %s', async (_label, email, hostedDomain) => {
+			userinfoResponse = () => Response.json({ id: 'google-user-5', name: 'Ada', email })
+
+			const response = await callback(
+				{ state: validState, code: 'google-code' },
+				testEnv({ HOSTED_DOMAIN: hostedDomain })
+			)
+
+			expect(response.status).toBe(302)
+			expect(completeAuthorization).toHaveBeenCalledOnce()
+		})
+
+		// Lowercasing must not weaken the lookalike check the block above pins.
+		it('still refuses a lookalike domain when the case differs', async () => {
+			userinfoResponse = () =>
+				Response.json({ id: 'google-user-6', name: 'Lookalike', email: 'Ada@NOTEXAMPLE.COM' })
+
+			const response = await callback(
+				{ state: validState, code: 'google-code' },
+				testEnv({ HOSTED_DOMAIN: 'Example.com' })
+			)
+
+			expect(response.status).toBe(403)
+			expect(completeAuthorization).not.toHaveBeenCalled()
+		})
+
 		it('admits any domain when HOSTED_DOMAIN is unset', async () => {
 			userinfoResponse = () =>
 				Response.json({ id: 'google-user-4', name: 'Anyone', email: 'anyone@elsewhere.com' })

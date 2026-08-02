@@ -184,8 +184,19 @@ app.get('/callback', async (c) => {
 		email: string
 	}
 
-	// Enforce domain restriction if HOSTED_DOMAIN is set
-	if (c.env.HOSTED_DOMAIN && !email.endsWith(`@${c.env.HOSTED_DOMAIN}`)) {
+	// Enforce domain restriction if HOSTED_DOMAIN is set.
+	//
+	// Both sides are lowercased before comparing. A domain is case-insensitive by definition,
+	// and the local part is not, but neither is compared here — the suffix being matched starts
+	// at the `@`, so lowercasing the whole address cannot make two different mailboxes look
+	// alike. Google normally hands back a lowercase `email`, so this is not a bug anyone was
+	// hitting; it is an access control that should not depend on a habit of the identity
+	// provider's, since the failure it would produce is a refusal that looks arbitrary.
+	//
+	// Keep the `@`. Matching the bare domain would admit `ada@notexample.com` against a hosted
+	// domain of `example.com`, and there is a test pinning exactly that.
+	const hostedDomain = c.env.HOSTED_DOMAIN?.toLowerCase()
+	if (hostedDomain && !email.toLowerCase().endsWith(`@${hostedDomain}`)) {
 		return c.text(`Access restricted to ${c.env.HOSTED_DOMAIN} domain users only`, 403)
 	}
 
