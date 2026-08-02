@@ -79,8 +79,17 @@ const stubUnanswered = () =>
 			})
 	)
 
-/** Advances past both backoff waits — 1s after the first failure, 2s after the second. */
-const drainBackoff = () => vi.advanceTimersByTimeAsync(3000)
+/**
+ * Advances past both backoff waits. They are ranges rather than fixed steps — [500, 1000]
+ * after the first failure and [1000, 2000] after the second — so this has to clear the top of
+ * both, and 3000 is that ceiling rather than the sum of two known waits.
+ *
+ * The extra 500 is deliberate slack. At exactly 3000 this works, but only because a wait that
+ * lands on the boundary still fires; anyone widening the jitter or adding a fourth attempt
+ * would then get `expected 3 calls, got 2` from whichever test ran, pointing at that test
+ * rather than at the budget here that stopped covering it.
+ */
+const drainBackoff = () => vi.advanceTimersByTimeAsync(3500)
 
 let client: ZendeskClient
 
@@ -633,6 +642,11 @@ describe('requestWithRetry', () => {
 	// The second attempt inherits what is left rather than starting its own 30 seconds, so
 	// the whole call still lands on the deadline instead of at 61 seconds.
 	it('gives a later attempt only the time the deadline has left', async () => {
+		// Pinned to the top of the jitter so the backoff is exactly the second the arithmetic
+		// below talks about. The assertions hold at any point in the range — the deadline is an
+		// absolute instant, so a shorter backoff just means a longer second attempt — but the
+		// comments would stop describing what ran.
+		vi.spyOn(Math, 'random').mockReturnValue(1)
 		let calls = 0
 		const fetchMock = stubFetch((_url, init) => {
 			calls += 1
@@ -680,7 +694,14 @@ describe('requestWithRetry', () => {
 		expect(vi.getTimerCount()).toBe(0)
 	})
 
-	it('waits one second, then two, and never sleeps after the last attempt', async () => {
+	/**
+	 * The ladder is jittered across the lower half of each step, so it is a range rather than a
+	 * pair of numbers and these two tests take its ends. Pinning `Math.random` is what makes
+	 * either end assertable; the alternative is a test that accepts a window, which would pass
+	 * just as happily if the spread quietly widened to something that undid the backoff.
+	 */
+	it('waits at most one second, then at most two, and never sleeps after the last attempt', async () => {
+		vi.spyOn(Math, 'random').mockReturnValue(1)
 		const fetchMock = stubFetch(async () => failedResponse(503, 'unavailable'))
 
 		const attempt = client.requestWithRetry('GET', '/tickets.json')
@@ -703,6 +724,62 @@ describe('requestWithRetry', () => {
 		expect(vi.getTimerCount()).toBe(0)
 	})
 
+	/**
+	 * The floor, which is the half of the spread worth pinning hardest. Jitter that can reach
+	 * zero is not a spread but a retry storm with extra steps, so the first wait has to stay
+	 * half a second even when the roll comes up as low as it goes.
+	 */
+	it('waits at least half of each step when the jitter rolls low', async () => {
+		vi.spyOn(Math, 'random').mockReturnValue(0)
+		const fetchMock = stubFetch(async () => failedResponse(503, 'unavailable'))
+
+		const attempt = client.requestWithRetry('GET', '/tickets.json')
+		const rejects = expect(attempt).rejects.toThrow('Zendesk API Error: 503')
+
+		await vi.advanceTimersByTimeAsync(499)
+		expect(fetchMock).toHaveBeenCalledTimes(1)
+		await vi.advanceTimersByTimeAsync(1)
+		expect(fetchMock).toHaveBeenCalledTimes(2)
+
+		await vi.advanceTimersByTimeAsync(999)
+		expect(fetchMock).toHaveBeenCalledTimes(2)
+		await vi.advanceTimersByTimeAsync(1)
+		expect(fetchMock).toHaveBeenCalledTimes(3)
+
+		await rejects
+		expect(vi.getTimerCount()).toBe(0)
+	})
+
+	/**
+	 * What the jitter is actually for, which neither end of the range shows on its own: two
+	 * callers that failed at the same instant have to come back at different ones. This is the
+	 * fan-out case in miniature — `get_help_center_hierarchy` issues a read per category and
+	 * then one per section through nested Promise.all, so a 503 fails all of them together, and
+	 * on a fixed ladder all of them would return together too.
+	 */
+	it('does not send two callers that failed together back together', async () => {
+		const rolls = [0, 1]
+		vi.spyOn(Math, 'random').mockImplementation(() => rolls.shift() ?? 0)
+		const fetchMock = stubFetch(async () => failedResponse(503, 'unavailable'))
+
+		const first = client.requestWithRetry('GET', '/tickets.json')
+		const second = client.requestWithRetry('GET', '/macros.json')
+		const settled = Promise.allSettled([first, second])
+
+		await vi.advanceTimersByTimeAsync(0)
+		expect(fetchMock).toHaveBeenCalledTimes(2)
+
+		// The one that rolled low is back at 500ms; the one that rolled high waits out the
+		// full second. Same failure, same instant, different return.
+		await vi.advanceTimersByTimeAsync(500)
+		expect(fetchMock).toHaveBeenCalledTimes(3)
+		await vi.advanceTimersByTimeAsync(500)
+		expect(fetchMock).toHaveBeenCalledTimes(4)
+
+		await drainBackoff()
+		await settled
+	})
+
 	it('stops as soon as an attempt succeeds', async () => {
 		let calls = 0
 		const fetchMock = stubFetch(async () => {
@@ -715,6 +792,109 @@ describe('requestWithRetry', () => {
 
 		await expect(attempt).resolves.toEqual({ tickets: [] })
 		expect(fetchMock).toHaveBeenCalledTimes(2)
+	})
+})
+
+/**
+ * The rule #54 settled: the HTTP verb decides whether a call is sent again, so a GET is
+ * attempted three times against a 503 and everything else is attempted once.
+ *
+ * `send` is what makes that true, so what this really asks of each method is whether it went
+ * through `send` at all. Nothing stops one reaching `request` or `requestWithRetry` directly
+ * and choosing for itself, which is exactly what the fifty-eight methods used to do.
+ *
+ * Driven off the prototype rather than a list of method names kept here, because a list kept
+ * here is the same discipline that produced the split in the first place — five methods
+ * retried, fifty-odd did not, and nothing said which was intended. Walking the class means a
+ * read that goes around `send` fails on the day it is written rather than whenever someone
+ * next reads the client top to bottom.
+ */
+describe('which methods retry', () => {
+	/**
+	 * Everything on the prototype that does not reach Zendesk: the constructor, the request
+	 * methods and the dispatcher itself, and the private helpers — all ordinary prototype
+	 * properties at runtime, whatever TypeScript calls them.
+	 *
+	 * A denylist on purpose, and the one place in this file where that is the right shape. An
+	 * allowlist would let a new method be forgotten silently, which is the failure being fixed;
+	 * this way a new API method is covered by default, and a new private helper announces itself
+	 * by failing here until it is named.
+	 */
+	const notAnApiCall = new Set([
+		'constructor',
+		'request',
+		'requestWithRetry',
+		'send',
+		'sanitizeSubdomain',
+		'sanitizeEndpoint',
+		'validateId',
+		'getBaseUrl',
+		'getAuthHeader',
+		'isRetryableError',
+	])
+
+	const apiMethods = Object.getOwnPropertyNames(ZendeskClient.prototype).filter(
+		(name) => !notAnApiCall.has(name)
+	)
+
+	/**
+	 * One value passed in both positions, which is what lets a single probe drive methods whose
+	 * signatures disagree about what goes where. Across the class, the first two parameters are
+	 * some arrangement of an id, a payload, a query string and a params object, so the probe has
+	 * to be a value every one of those accepts.
+	 *
+	 * A positive integer is that value, and the test below pins the three reasons rather than
+	 * leaving them to be rediscovered — they are the sort of thing that reads as an arbitrary
+	 * choice once the person who made it has moved on.
+	 */
+	const PROBE = 1
+	const probeArguments = [PROBE, PROBE]
+
+	/**
+	 * Why `1` works everywhere. Each of these is load-bearing: if one stopped holding, the probe
+	 * would throw before reaching fetch and every case below would fail at once, which is loud
+	 * but says nothing about the cause. Asserting them separately is what makes the cause
+	 * readable, and stops the probe being changed to a value that only looks equivalent.
+	 */
+	it('is driven by a value every parameter position accepts', () => {
+		// An id: positive and whole, so validateId passes it.
+		expect(Number.isInteger(PROBE) && PROBE > 0).toBe(true)
+		// A payload: serializes rather than throwing the way a circular object would.
+		expect(JSON.stringify(PROBE)).toBe('1')
+		// A params object: yields no query parameters. A string here would enumerate to its
+		// characters and put `0=x` on the URL instead. This covers `search` spreading its
+		// second argument too, since a spread enumerates exactly what Object.entries does.
+		expect(Object.entries(PROBE)).toEqual([])
+	})
+
+	const callable = (name: string) =>
+		(client as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>)[name]
+
+	/**
+	 * `it.each` over an empty array runs nothing and still reports the file green, so what the
+	 * walk found is asserted rather than assumed. Without this, a change in how the class is
+	 * built — methods moved to instance fields, or reached through a mixin — would retire the
+	 * whole block silently, which is the failure it exists to prevent happening one level up.
+	 */
+	it('found the methods to drive', () => {
+		expect(apiMethods).toContain('listTickets')
+		expect(apiMethods).toContain('createTicket')
+		expect(apiMethods.length).toBeGreaterThan(50)
+	})
+
+	it.each(apiMethods)('sends %s again only if it is a GET', async (name) => {
+		const fetchMock = stubFetch(async () => failedResponse(503, 'unavailable'))
+
+		const call = callable(name).apply(client, probeArguments)
+		const rejects = expect(call).rejects.toThrow('Zendesk API Error: 503')
+		await drainBackoff()
+		await rejects
+
+		// Read off what went out rather than off the method's name, so the assertion turns on
+		// the same fact the client does. A method whose arguments never reached fetch has
+		// already failed the line above, so there is a call to read here.
+		const expected = sent(fetchMock).method === 'GET' ? 3 : 1
+		expect(fetchMock).toHaveBeenCalledTimes(expected)
 	})
 })
 
@@ -734,7 +914,7 @@ describe('Retry-After', () => {
 		)
 	})
 
-	// The ladder would have asked again at one second. Retrying sooner than you were told to
+	// The ladder would have asked again within a second. Retrying sooner than you were told to
 	// is worse than not retrying: it spends more of a quota already exhausted, and providers
 	// commonly extend the penalty for a caller that keeps knocking.
 	it('is waited out instead of the client running its own ladder', async () => {
@@ -789,8 +969,10 @@ describe('Retry-After', () => {
 	})
 
 	/**
-	 * None of these says anything usable about how long to wait, so the ladder answers and the
-	 * first retry lands at one second.
+	 * None of these says anything usable about how long to wait, so the ladder answers instead.
+	 * `Math.random` is pinned to the top of the jitter so that "the ladder answered" is a single
+	 * number to assert rather than a window — what these are about is which of the two sources
+	 * decided, not what the spread does with it.
 	 *
 	 * The last three are why the guard is a positive-wait check rather than a tighter pattern.
 	 * `Date.parse` reads '-5' as May 2001 and '120' as the year 120, so it cannot be trusted
@@ -806,6 +988,7 @@ describe('Retry-After', () => {
 		['a date already past', 'Sat, 01 Aug 2026 11:59:00 GMT'],
 	])('falls back to the ladder for %s', async (_label, header) => {
 		vi.setSystemTime(new Date('2026-08-01T12:00:00Z'))
+		vi.spyOn(Math, 'random').mockReturnValue(1)
 		const fetchMock = stubFetch(async () => rateLimited(header))
 
 		const attempt = client.requestWithRetry('GET', '/tickets.json')

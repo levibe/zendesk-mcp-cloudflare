@@ -490,13 +490,31 @@ export class ZendeskClient {
 					throw error
 				}
 
-				// Calculate exponential backoff delay: 1s, 2s, 4s (capped at 5s)
-				const backoff = Math.min(1000 * Math.pow(2, attempt), 5000)
+				// Exponential backoff — 1s, 2s, 4s, capped at 5s — spread across the lower half
+				// of each step so that callers who failed together do not come back together.
+				//
+				// The spread matters more than it did when five methods retried and none of
+				// them fanned out. `get_help_center_hierarchy` issues one read per category and
+				// then one per section through nested Promise.all, so a Zendesk 503 fails a
+				// hundred requests within a few milliseconds of each other. On a fixed ladder
+				// all hundred sleep exactly 1000ms and arrive back in one burst, which is the
+				// shape that turns a recovering backend into a still-failing one.
+				//
+				// Half the step rather than the whole of it, so the spread cannot undo the
+				// backoff: the first retry lands somewhere in 500-1000ms, never at 20ms.
+				const ladder = Math.min(1000 * Math.pow(2, attempt), 5000)
+				const backoff = Math.round(ladder / 2 + Math.random() * (ladder / 2))
 
 				// A rate limit says how long to wait, and asking again sooner is worse than not
 				// asking at all: the early retry spends more of a quota already exhausted, and
 				// providers commonly extend the penalty for a caller that keeps knocking. The
 				// ladder is the fallback for the responses that say nothing.
+				//
+				// Deliberately not jittered, for the same reason. Jitter is a spread around a
+				// number this client chose, and `Retry-After` is not that — spreading it means
+				// half the callers asking earlier than Zendesk agreed to. The herd argument
+				// above does not apply either: a 429 window resets at one moment for everyone,
+				// so there is no spread that would make arriving before it useful.
 				const requested = retryAfterFrom(error)
 				const delay = requested ?? backoff
 
@@ -537,28 +555,66 @@ export class ZendeskClient {
 		throw lastError
 	}
 
+	/**
+	 * What every method below calls. Reads the verb and picks the retry policy from it, so that
+	 * an API method says what request it wants and never how many times to send it.
+	 *
+	 * Every GET is retried and nothing else is. A GET changes nothing, so sending it again
+	 * costs only time — and since #32 the time is bounded anyway, because one deadline covers
+	 * every attempt and every backoff together. That makes retrying a read close to free.
+	 *
+	 * A write is the case that has to be argued rather than assumed. Zendesk takes no
+	 * idempotency key on these endpoints, so a 503 on a create that had actually succeeded is
+	 * indistinguishable from one on a create that had not, and asking again makes the second
+	 * ticket. Nothing here can tell those apart, so nothing here retries a write.
+	 *
+	 * That rule is blunter than the facts support, deliberately and for now. A 429 or a 408
+	 * means the request was refused before it was acted on, so a write could safely go out
+	 * again on either — but acting on that means `RETRYABLE_STATUSES` stops being one set and
+	 * starts depending on the verb, which is #58.
+	 *
+	 * The dispatch existing at all is the point, and is what #54 was really about. Before it,
+	 * each method chose between `request` and `requestWithRetry` for itself, and five had
+	 * chosen to retry against fifty-odd that had not — `getTicket` surviving a 503 where
+	 * `getMacro` gave up on it, though they are the same verb against the same API. They read
+	 * as the methods that had caused visible trouble at some point and had retrying added to
+	 * them one at a time. A policy nobody at the call site can express is what stops that
+	 * reassembling; `which methods retry` in the tests is what catches a method going around
+	 * this one to reach `request` directly.
+	 */
+	private async send(
+		method: string,
+		endpoint: string,
+		data?: unknown,
+		params?: Record<string, unknown>
+	): Promise<unknown> {
+		return method === 'GET'
+			? this.requestWithRetry(method, endpoint, data, params)
+			: this.request(method, endpoint, data, params)
+	}
+
 	// === TICKETS API ===
 	async listTickets(params?: Record<string, unknown>) {
-		return this.request('GET', '/tickets.json', null, params)
+		return this.send('GET', '/tickets.json', null, params)
 	}
 
 	async getTicket(id: number) {
 		this.validateId(id)
-		return this.requestWithRetry('GET', `/tickets/${id}.json`)
+		return this.send('GET', `/tickets/${id}.json`)
 	}
 
 	async createTicket(data: any) {
-		return this.request('POST', '/tickets.json', { ticket: data })
+		return this.send('POST', '/tickets.json', { ticket: data })
 	}
 
 	async updateTicket(id: number, data: any) {
 		this.validateId(id)
-		return this.request('PUT', `/tickets/${id}.json`, { ticket: data })
+		return this.send('PUT', `/tickets/${id}.json`, { ticket: data })
 	}
 
 	async deleteTicket(id: number) {
 		this.validateId(id)
-		return this.request('DELETE', `/tickets/${id}.json`)
+		return this.send('DELETE', `/tickets/${id}.json`)
 	}
 
 	// === USERS API ===
@@ -571,88 +627,88 @@ export class ZendeskClient {
 	 * which is not whether a request works but which identity the server is using.
 	 */
 	async getCurrentUser() {
-		return this.requestWithRetry('GET', '/users/me.json')
+		return this.send('GET', '/users/me.json')
 	}
 
 	async listUsers(params?: Record<string, unknown>) {
-		return this.request('GET', '/users.json', null, params)
+		return this.send('GET', '/users.json', null, params)
 	}
 
 	async getUser(id: number) {
 		this.validateId(id)
-		return this.requestWithRetry('GET', `/users/${id}.json`)
+		return this.send('GET', `/users/${id}.json`)
 	}
 
 	async createUser(data: any) {
-		return this.request('POST', '/users.json', { user: data })
+		return this.send('POST', '/users.json', { user: data })
 	}
 
 	async updateUser(id: number, data: any) {
 		this.validateId(id)
-		return this.request('PUT', `/users/${id}.json`, { user: data })
+		return this.send('PUT', `/users/${id}.json`, { user: data })
 	}
 
 	async deleteUser(id: number) {
 		this.validateId(id)
-		return this.request('DELETE', `/users/${id}.json`)
+		return this.send('DELETE', `/users/${id}.json`)
 	}
 
 	// === ORGANIZATIONS API ===
 	async listOrganizations(params?: Record<string, unknown>) {
-		return this.request('GET', '/organizations.json', null, params)
+		return this.send('GET', '/organizations.json', null, params)
 	}
 
 	async getOrganization(id: number) {
 		this.validateId(id)
-		return this.request('GET', `/organizations/${id}.json`)
+		return this.send('GET', `/organizations/${id}.json`)
 	}
 
 	async createOrganization(data: any) {
-		return this.request('POST', '/organizations.json', { organization: data })
+		return this.send('POST', '/organizations.json', { organization: data })
 	}
 
 	async updateOrganization(id: number, data: any) {
 		this.validateId(id)
-		return this.request('PUT', `/organizations/${id}.json`, { organization: data })
+		return this.send('PUT', `/organizations/${id}.json`, { organization: data })
 	}
 
 	async deleteOrganization(id: number) {
 		this.validateId(id)
-		return this.request('DELETE', `/organizations/${id}.json`)
+		return this.send('DELETE', `/organizations/${id}.json`)
 	}
 
 	// === GROUPS API ===
 	async listGroups(params?: Record<string, unknown>) {
-		return this.request('GET', '/groups.json', null, params)
+		return this.send('GET', '/groups.json', null, params)
 	}
 
 	async getGroup(id: number) {
 		this.validateId(id)
-		return this.request('GET', `/groups/${id}.json`)
+		return this.send('GET', `/groups/${id}.json`)
 	}
 
 	async createGroup(data: any) {
-		return this.request('POST', '/groups.json', { group: data })
+		return this.send('POST', '/groups.json', { group: data })
 	}
 
 	async updateGroup(id: number, data: any) {
 		this.validateId(id)
-		return this.request('PUT', `/groups/${id}.json`, { group: data })
+		return this.send('PUT', `/groups/${id}.json`, { group: data })
 	}
 
 	async deleteGroup(id: number) {
 		this.validateId(id)
-		return this.request('DELETE', `/groups/${id}.json`)
+		return this.send('DELETE', `/groups/${id}.json`)
 	}
 
 	// === MACROS API ===
 	async listMacros(params?: Record<string, unknown>) {
-		return this.request('GET', '/macros.json', null, params)
+		return this.send('GET', '/macros.json', null, params)
 	}
 
 	async getMacro(id: number) {
 		this.validateId(id)
-		return this.request('GET', `/macros/${id}.json`)
+		return this.send('GET', `/macros/${id}.json`)
 	}
 
 	/**
@@ -661,200 +717,200 @@ export class ZendeskClient {
 	 * create and update payloads are still `any` and are #12's to settle.
 	 */
 	async createMacro(data: MacroCreatePayload) {
-		return this.request('POST', '/macros.json', { macro: data })
+		return this.send('POST', '/macros.json', { macro: data })
 	}
 
 	async updateMacro(id: number, data: MacroUpdatePayload) {
 		this.validateId(id)
-		return this.request('PUT', `/macros/${id}.json`, { macro: data })
+		return this.send('PUT', `/macros/${id}.json`, { macro: data })
 	}
 
 	async deleteMacro(id: number) {
 		this.validateId(id)
-		return this.request('DELETE', `/macros/${id}.json`)
+		return this.send('DELETE', `/macros/${id}.json`)
 	}
 
 	// === VIEWS API ===
 	async listViews(params?: Record<string, unknown>) {
-		return this.request('GET', '/views.json', null, params)
+		return this.send('GET', '/views.json', null, params)
 	}
 
 	async getView(id: number) {
 		this.validateId(id)
-		return this.request('GET', `/views/${id}.json`)
+		return this.send('GET', `/views/${id}.json`)
 	}
 
 	async createView(data: any) {
-		return this.request('POST', '/views.json', { view: data })
+		return this.send('POST', '/views.json', { view: data })
 	}
 
 	async updateView(id: number, data: any) {
 		this.validateId(id)
-		return this.request('PUT', `/views/${id}.json`, { view: data })
+		return this.send('PUT', `/views/${id}.json`, { view: data })
 	}
 
 	async deleteView(id: number) {
 		this.validateId(id)
-		return this.request('DELETE', `/views/${id}.json`)
+		return this.send('DELETE', `/views/${id}.json`)
 	}
 
 	// === TRIGGERS API ===
 	async listTriggers(params?: Record<string, unknown>) {
-		return this.request('GET', '/triggers.json', null, params)
+		return this.send('GET', '/triggers.json', null, params)
 	}
 
 	async getTrigger(id: number) {
 		this.validateId(id)
-		return this.request('GET', `/triggers/${id}.json`)
+		return this.send('GET', `/triggers/${id}.json`)
 	}
 
 	async createTrigger(data: any) {
-		return this.request('POST', '/triggers.json', { trigger: data })
+		return this.send('POST', '/triggers.json', { trigger: data })
 	}
 
 	async updateTrigger(id: number, data: any) {
 		this.validateId(id)
-		return this.request('PUT', `/triggers/${id}.json`, { trigger: data })
+		return this.send('PUT', `/triggers/${id}.json`, { trigger: data })
 	}
 
 	async deleteTrigger(id: number) {
 		this.validateId(id)
-		return this.request('DELETE', `/triggers/${id}.json`)
+		return this.send('DELETE', `/triggers/${id}.json`)
 	}
 
 	// === AUTOMATIONS API ===
 	async listAutomations(params?: Record<string, unknown>) {
-		return this.request('GET', '/automations.json', null, params)
+		return this.send('GET', '/automations.json', null, params)
 	}
 
 	async getAutomation(id: number) {
 		this.validateId(id)
-		return this.request('GET', `/automations/${id}.json`)
+		return this.send('GET', `/automations/${id}.json`)
 	}
 
 	async createAutomation(data: any) {
-		return this.request('POST', '/automations.json', { automation: data })
+		return this.send('POST', '/automations.json', { automation: data })
 	}
 
 	async updateAutomation(id: number, data: any) {
 		this.validateId(id)
-		return this.request('PUT', `/automations/${id}.json`, { automation: data })
+		return this.send('PUT', `/automations/${id}.json`, { automation: data })
 	}
 
 	async deleteAutomation(id: number) {
 		this.validateId(id)
-		return this.request('DELETE', `/automations/${id}.json`)
+		return this.send('DELETE', `/automations/${id}.json`)
 	}
 
 	// === SEARCH API ===
 	async search(query: string, params: Record<string, unknown> = {}) {
-		return this.requestWithRetry('GET', '/search.json', null, { query, ...params })
+		return this.send('GET', '/search.json', null, { query, ...params })
 	}
 
 	// === HELP CENTER API ===
 	async listArticles(params?: Record<string, unknown>) {
-		return this.request('GET', '/help_center/articles.json', null, params)
+		return this.send('GET', '/help_center/articles.json', null, params)
 	}
 
 	async getArticle(id: number) {
 		this.validateId(id)
-		return this.request('GET', `/help_center/articles/${id}.json`)
+		return this.send('GET', `/help_center/articles/${id}.json`)
 	}
 
 	async createArticle(data: any, sectionId: number) {
 		this.validateId(sectionId)
-		return this.request('POST', `/help_center/sections/${sectionId}/articles.json`, {
+		return this.send('POST', `/help_center/sections/${sectionId}/articles.json`, {
 			article: data,
 		})
 	}
 
 	async updateArticle(id: number, data: any) {
 		this.validateId(id)
-		return this.request('PUT', `/help_center/articles/${id}.json`, { article: data })
+		return this.send('PUT', `/help_center/articles/${id}.json`, { article: data })
 	}
 
 	async deleteArticle(id: number) {
 		this.validateId(id)
-		return this.request('DELETE', `/help_center/articles/${id}.json`)
+		return this.send('DELETE', `/help_center/articles/${id}.json`)
 	}
 
 	async searchArticles(params?: Record<string, unknown>) {
-		return this.requestWithRetry('GET', '/help_center/articles/search.json', null, params)
+		return this.send('GET', '/help_center/articles/search.json', null, params)
 	}
 
 	// Categories
 	async listCategories(params?: Record<string, unknown>) {
-		return this.request('GET', '/help_center/categories.json', null, params)
+		return this.send('GET', '/help_center/categories.json', null, params)
 	}
 
 	async getCategory(id: number) {
 		this.validateId(id)
-		return this.request('GET', `/help_center/categories/${id}.json`)
+		return this.send('GET', `/help_center/categories/${id}.json`)
 	}
 
 	/* DISABLED FOR SECURITY - create_category method
 	async createCategory (data: any) {
-		return this.request('POST', '/help_center/categories.json', { category: data })
+		return this.send('POST', '/help_center/categories.json', { category: data })
 	}
 	*/
 
 	/* DISABLED FOR SECURITY - update_category method
 	async updateCategory (id: number, data: any) {
-		return this.request('PUT', `/help_center/categories/${id}.json`, { category: data })
+		return this.send('PUT', `/help_center/categories/${id}.json`, { category: data })
 	}
 	*/
 
 	/* DISABLED FOR SECURITY - delete_category method
 	async deleteCategory (id: number) {
-		return this.request('DELETE', `/help_center/categories/${id}.json`)
+		return this.send('DELETE', `/help_center/categories/${id}.json`)
 	}
 	*/
 
 	// Sections
 	async listSections(params?: Record<string, unknown>) {
-		return this.request('GET', '/help_center/sections.json', null, params)
+		return this.send('GET', '/help_center/sections.json', null, params)
 	}
 
 	async getSection(id: number) {
 		this.validateId(id)
-		return this.request('GET', `/help_center/sections/${id}.json`)
+		return this.send('GET', `/help_center/sections/${id}.json`)
 	}
 
 	/* DISABLED FOR SECURITY - create_section method
 	async createSection (data: any, categoryId: number) {
-		return this.request('POST', `/help_center/categories/${categoryId}/sections.json`, { section: data })
+		return this.send('POST', `/help_center/categories/${categoryId}/sections.json`, { section: data })
 	}
 	*/
 
 	/* DISABLED FOR SECURITY - update_section method
 	async updateSection (id: number, data: any) {
-		return this.request('PUT', `/help_center/sections/${id}.json`, { section: data })
+		return this.send('PUT', `/help_center/sections/${id}.json`, { section: data })
 	}
 	*/
 
 	/* DISABLED FOR SECURITY - delete_section method
 	async deleteSection (id: number) {
-		return this.request('DELETE', `/help_center/sections/${id}.json`)
+		return this.send('DELETE', `/help_center/sections/${id}.json`)
 	}
 	*/
 
 	async listSectionsByCategory(categoryId: number, params?: Record<string, unknown>) {
 		this.validateId(categoryId)
-		return this.request('GET', `/help_center/categories/${categoryId}/sections.json`, null, params)
+		return this.send('GET', `/help_center/categories/${categoryId}/sections.json`, null, params)
 	}
 
 	async listArticlesBySection(sectionId: number, params?: Record<string, unknown>) {
 		this.validateId(sectionId)
-		return this.request('GET', `/help_center/sections/${sectionId}/articles.json`, null, params)
+		return this.send('GET', `/help_center/sections/${sectionId}/articles.json`, null, params)
 	}
 
 	// === TALK API ===
 	async getTalkStats() {
-		return this.request('GET', '/channels/voice/stats.json')
+		return this.send('GET', '/channels/voice/stats.json')
 	}
 
 	// === CHAT API ===
 	async listChats(params?: Record<string, unknown>) {
-		return this.request('GET', '/chats.json', null, params)
+		return this.send('GET', '/chats.json', null, params)
 	}
 }
