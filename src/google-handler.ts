@@ -8,6 +8,20 @@ import {
 	renderApprovalDialog,
 } from './workers-oauth-utils'
 
+/**
+ * What to write to the log about a thrown value, whatever it turned out to be.
+ *
+ * Every route here catches something it cannot answer and logs the reason while telling the
+ * caller a fixed sentence, so this expression appeared five times. Once is better for an
+ * ordinary reason — one place to change if the wording moves — and for one that is specific to
+ * this file: the `String` arm is unreachable from most of those catches, since `atob`,
+ * `JSON.parse` and `btoa` all throw real `Error`s. Written inline it was five branch pairs of
+ * which only one could ever be exercised, so coverage on this file measured the reachability of
+ * a ternary rather than whether the guards around it were tested.
+ */
+const reasonFor = (error: unknown): string =>
+	error instanceof Error ? error.message : String(error)
+
 const app = new Hono<{ Bindings: Env & { OAUTH_PROVIDER: OAuthHelpers } }>()
 
 app.get('/authorize', async (c) => {
@@ -22,10 +36,7 @@ app.get('/authorize', async (c) => {
 	try {
 		oauthReqInfo = await c.env.OAUTH_PROVIDER.parseAuthRequest(c.req.raw)
 	} catch (error) {
-		console.warn(
-			'parseAuthRequest rejected the request:',
-			error instanceof Error ? error.message : String(error)
-		)
+		console.warn('parseAuthRequest rejected the request:', reasonFor(error))
 		return c.text('Invalid authorization request', 400)
 	}
 
@@ -71,10 +82,7 @@ app.post('/authorize', async (c) => {
 	try {
 		approval = await parseRedirectApproval(c.req.raw, c.env.COOKIE_ENCRYPTION_KEY)
 	} catch (error) {
-		console.warn(
-			'parseRedirectApproval rejected the request:',
-			error instanceof Error ? error.message : String(error)
-		)
+		console.warn('parseRedirectApproval rejected the request:', reasonFor(error))
 		return c.text('Invalid request', 400)
 	}
 
@@ -111,10 +119,7 @@ async function redirectToGoogle(
 	try {
 		state = btoa(JSON.stringify(oauthReqInfo))
 	} catch (error) {
-		console.warn(
-			'The authorization request could not be encoded as state:',
-			error instanceof Error ? error.message : String(error)
-		)
+		console.warn('The authorization request could not be encoded as state:', reasonFor(error))
 		return c.text('Invalid request', 400)
 	}
 
@@ -135,12 +140,9 @@ async function redirectToGoogle(
 }
 
 /**
- * OAuth Callback Endpoint
- *
- * This route handles the callback from Google after user authentication.
- * It exchanges the temporary code for an access token, then stores some
- * user metadata & the auth token as part of the 'props' on the token passed
- * down to the client. It ends by redirecting the client back to _its_ callback URL
+ * Exchanges Google's code for an access token, completes the authorization, and redirects the
+ * client back to its own callback. What goes into `props` is encrypted into the access token
+ * and is what a tool can later read through `getMcpAuthContext()` — see `Props` in ../utils.
  */
 app.get('/callback', async (c) => {
 	// The `state` here is `btoa(JSON.stringify(oauthReqInfo))` — see redirectToGoogle above. It
@@ -179,10 +181,7 @@ app.get('/callback', async (c) => {
 	try {
 		decodedState = JSON.parse(atob(encodedState))
 	} catch (error) {
-		console.warn(
-			'Callback state could not be decoded:',
-			error instanceof Error ? error.message : String(error)
-		)
+		console.warn('Callback state could not be decoded:', reasonFor(error))
 		return c.text('Invalid state', 400)
 	}
 
@@ -234,7 +233,6 @@ app.get('/callback', async (c) => {
 		return googleErrResponse
 	}
 
-	// Fetch the user info from Google
 	const userResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
 		headers: {
 			Authorization: `Bearer ${accessToken}`,
@@ -301,10 +299,7 @@ app.get('/callback', async (c) => {
 			userId: id,
 		}))
 	} catch (error) {
-		console.warn(
-			'completeAuthorization rejected the request:',
-			error instanceof Error ? error.message : String(error)
-		)
+		console.warn('completeAuthorization rejected the request:', reasonFor(error))
 		return c.text('Invalid authorization request', 400)
 	}
 

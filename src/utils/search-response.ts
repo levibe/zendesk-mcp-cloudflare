@@ -1,7 +1,3 @@
-/**
- * Utilities for standardizing search response formats across all search tools
- */
-
 import type {
 	SearchResponseMetadata,
 	StandardizedSearchResult,
@@ -9,10 +5,6 @@ import type {
 } from '../types/zendesk'
 import { isRecord } from './narrow'
 
-/**
- * Standardizes search response format by adding result_type to each result
- * and organizing metadata consistently
- */
 export function standardizeSearchResponse(
 	rawResponse: unknown,
 	defaultResultType?: string
@@ -26,18 +18,17 @@ export function standardizeSearchResponse(
 
 	const results: unknown[] = Array.isArray(rawResponse.results) ? rawResponse.results : []
 
-	// Add result_type to each result if not already present
 	const standardizedResults: StandardizedSearchResult[] = results.map((result) => {
 		if (!isRecord(result)) {
 			return { result_type: defaultResultType || 'unknown' }
 		}
 
-		// If result_type is already present, keep it
 		if (result.result_type) {
 			return { ...result, result_type: String(result.result_type) }
 		}
 
-		// Try to infer result_type from the object structure
+		// Zendesk search returns mixed entity types and does not always label them, so the
+		// resource URL is the fallback signal for what a result actually is.
 		let resultType = defaultResultType || 'unknown'
 
 		if (typeof result.url === 'string') {
@@ -68,12 +59,10 @@ export function standardizeSearchResponse(
 	const previousPage =
 		typeof rawResponse.previous_page === 'string' ? rawResponse.previous_page : null
 
-	// Standardize metadata
 	const metadata: SearchResponseMetadata = {
 		total_count: count || results.length,
 	}
 
-	// Add pagination info if available
 	if (nextPage || previousPage) {
 		metadata.page_info = {
 			has_next_page: !!nextPage,
@@ -90,9 +79,6 @@ export function standardizeSearchResponse(
 	}
 }
 
-/**
- * Wrapper function for search operations that automatically standardizes the response
- */
 export async function executeSearchWithStandardizedResponse(
 	searchOperation: () => Promise<unknown>,
 	defaultResultType?: string
@@ -105,7 +91,6 @@ export async function executeSearchWithStandardizedResponse(
 	} catch (error) {
 		const duration = Date.now() - startTime
 
-		// Structured logging for Cloudflare Workers observability
 		console.error('Search operation failed', {
 			error:
 				error instanceof Error
@@ -120,7 +105,6 @@ export async function executeSearchWithStandardizedResponse(
 			timestamp: new Date().toISOString(),
 		})
 
-		// Enhanced error response with detailed metadata for MCP clients
 		const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
 		const errorType = error instanceof Error ? error.constructor.name : 'UnknownError'
 
@@ -130,7 +114,6 @@ export async function executeSearchWithStandardizedResponse(
 			duration,
 		}
 
-		// Include error cause chain if available
 		if (error instanceof Error && error.cause) {
 			errorMetadata.errorCause =
 				error.cause instanceof Error ? error.cause.message : String(error.cause)

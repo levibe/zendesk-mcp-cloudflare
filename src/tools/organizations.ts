@@ -1,7 +1,3 @@
-/**
- * Organization management tools for creating and managing customer organizations
- */
-
 import { z } from 'zod'
 import type { ToolDefinition } from '../types/zendesk'
 import {
@@ -70,7 +66,6 @@ export const organizationsTools: ToolDefinition[] = [
 		async (client, params) => {
 			const { query } = params
 
-			// Build the search query with filters
 			let searchQuery = `type:organization ${query}`
 
 			if (params.domain) searchQuery += ` domain:${params.domain}`
