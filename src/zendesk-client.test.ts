@@ -427,6 +427,45 @@ describe('requestWithRetry', () => {
 		expect(fetchMock).not.toHaveBeenCalled()
 	})
 
+	/**
+	 * The same shape as the missing credential above, and the reason the try starts where it
+	 * does rather than at the top of `request`.
+	 *
+	 * Preparing a request can fail, and none of those failures mean "nothing came back" —
+	 * they mean nothing was sent. `btoa` rejects any credential holding a character outside
+	 * Latin-1, which is what a token pasted with a smart quote looks like, and JSON.stringify
+	 * rejects a body it cannot serialize. Wrapped as ZendeskRequestErrors they would be
+	 * indistinguishable from a dropped connection and asked three times over.
+	 *
+	 * Staying a plain Error is the mechanism, so that is what these assert, alongside fetch
+	 * never being reached and no timer being left behind.
+	 */
+	it('does not retry a credential btoa cannot encode', async () => {
+		const fetchMock = stubFetch(async () => jsonResponse({}))
+		// A smart quote, which is what a token pasted out of a document or a chat carries.
+		const smartQuoted = new ZendeskClient({ ...credentials, apiToken: 'abc’def' })
+
+		const failure = smartQuoted.requestWithRetry('GET', '/tickets.json')
+
+		await expect(failure).rejects.toThrow()
+		await expect(failure).rejects.not.toBeInstanceOf(ZendeskRequestError)
+		expect(fetchMock).not.toHaveBeenCalled()
+		expect(vi.getTimerCount()).toBe(0)
+	})
+
+	it('does not retry a body that will not serialize', async () => {
+		const fetchMock = stubFetch(async () => jsonResponse({}))
+		const circular: Record<string, unknown> = {}
+		circular.self = circular
+
+		const failure = client.requestWithRetry('POST', '/tickets.json', circular)
+
+		await expect(failure).rejects.toThrow(/circular/i)
+		await expect(failure).rejects.not.toBeInstanceOf(ZendeskRequestError)
+		expect(fetchMock).not.toHaveBeenCalled()
+		expect(vi.getTimerCount()).toBe(0)
+	})
+
 	// Zendesk answered, so this is not a request that failed to complete. The status is put on
 	// the error to say so — without it, the rule above would send the request a second time,
 	// re-asking for something that already arrived because its body would not parse.

@@ -242,86 +242,93 @@ export class ZendeskClient {
 			throw new Error('Zendesk credentials not configured. Please set environment variables.')
 		}
 
+		// Preparing the request happens outside the try, and where the try starts is the whole
+		// point rather than a detail of layout. What it does is rewrap whatever it catches as a
+		// ZendeskRequestError, and one of those carrying no status is how the retry policy
+		// recognises a request that went out and got nothing back. None of the work below is
+		// that, and some of it can throw: `btoa` rejects any credential containing a character
+		// outside Latin-1, which is what a token pasted with a smart quote looks like, and
+		// JSON.stringify rejects a body it cannot serialize. Both fail identically on the third
+		// attempt. Leaving here as plain Errors is what tells the classifier no request was
+		// ever made — the same reason the credentials check above sits where it does.
+		const sanitizedEndpoint = this.sanitizeEndpoint(endpoint)
+
+		const url = new URL(`${this.getBaseUrl()}${sanitizedEndpoint}`)
+
+		// Add query parameters if provided
+		if (params) {
+			Object.entries(params).forEach(([key, value]) => {
+				if (value !== undefined && value !== null) {
+					url.searchParams.append(key, String(value))
+				}
+			})
+		}
+
+		// `redirect` is left at its default of `follow`, and a redirect that crosses to
+		// another host is now followed without this header —
+		// `strip_authorization_on_cross_origin_redirect` has been the platform default
+		// since 2025-09-01, and the compatibility date finally sits past it. The second
+		// request goes out unauthenticated and comes back 401, which reads exactly like a
+		// revoked API token. A renamed subdomain is how that would happen here. See #39.
+		const headers: Record<string, string> = {
+			Authorization: this.getAuthHeader(),
+			'Content-Type': 'application/json',
+			Accept: 'application/json',
+		}
+
+		// Only include body for non-GET requests
+		const body =
+			method !== 'GET' && data !== null && data !== undefined ? JSON.stringify(data) : undefined
+
+		// Create AbortController for timeout (compatible with all Workers versions).
+		// `timeoutMs` is whatever the caller has left rather than a fresh 30 seconds, so a
+		// retried attempt cannot extend the total past the deadline that governs the call.
+		// Armed last, after everything above that can throw, so a failure while preparing the
+		// request cannot leave a live timer behind holding the isolate awake.
+		const abortController = new AbortController()
+		const timeoutId = setTimeout(() => abortController.abort(), timeoutMs)
+
+		const requestInit: RequestInit = {
+			method,
+			headers,
+			signal: abortController.signal,
+		}
+		if (body !== undefined) {
+			requestInit.body = body
+		}
+
 		try {
-			// Sanitize endpoint to prevent path traversal attacks
-			const sanitizedEndpoint = this.sanitizeEndpoint(endpoint)
+			const response = await fetch(url.toString(), requestInit)
 
-			const url = new URL(`${this.getBaseUrl()}${sanitizedEndpoint}`)
-
-			// Add query parameters if provided
-			if (params) {
-				Object.entries(params).forEach(([key, value]) => {
-					if (value !== undefined && value !== null) {
-						url.searchParams.append(key, String(value))
-					}
-				})
+			if (!response.ok) {
+				const errorText = await response.text()
+				throw new ZendeskRequestError(
+					`Zendesk API Error: ${response.status} - ${errorText}`,
+					response.status,
+					parseRetryAfter(response.headers.get('retry-after'))
+				)
 			}
 
-			// `redirect` is left at its default of `follow`, and a redirect that crosses to
-			// another host is now followed without this header —
-			// `strip_authorization_on_cross_origin_redirect` has been the platform default
-			// since 2025-09-01, and the compatibility date finally sits past it. The second
-			// request goes out unauthenticated and comes back 401, which reads exactly like a
-			// revoked API token. A renamed subdomain is how that would happen here. See #39.
-			const headers: Record<string, string> = {
-				Authorization: this.getAuthHeader(),
-				'Content-Type': 'application/json',
-				Accept: 'application/json',
-			}
-
-			// Create AbortController for timeout (compatible with all Workers versions).
-			// `timeoutMs` is whatever the caller has left rather than a fresh 30 seconds, so a
-			// retried attempt cannot extend the total past the deadline that governs the call.
-			const abortController = new AbortController()
-			const timeoutId = setTimeout(() => abortController.abort(), timeoutMs)
-
-			const requestInit: RequestInit = {
-				method,
-				headers,
-				signal: abortController.signal,
-			}
-
-			// Only include body for non-GET requests
-			if (method !== 'GET' && data !== null && data !== undefined) {
-				requestInit.body = JSON.stringify(data)
-			}
-
-			try {
-				const response = await fetch(url.toString(), requestInit)
-				clearTimeout(timeoutId)
-
-				if (!response.ok) {
-					const errorText = await response.text()
+			// Handle empty responses (e.g., from DELETE requests)
+			const contentType = response.headers.get('content-type')
+			if (contentType && contentType.includes('application/json')) {
+				try {
+					return await response.json()
+				} catch (cause) {
+					// Carrying the status matters more than it looks. Zendesk answered, so
+					// this is not a request that failed to complete — and without a status
+					// the retry policy would read it as exactly that and ask again, re-sending
+					// something that already arrived on the strength of a body we could not
+					// parse. 200 is not in the retryable set, so it fails once and says why.
 					throw new ZendeskRequestError(
-						`Zendesk API Error: ${response.status} - ${errorText}`,
+						`Zendesk answered ${response.status} with a body that is not valid JSON`,
 						response.status,
-						parseRetryAfter(response.headers.get('retry-after'))
+						undefined,
+						{ cause }
 					)
 				}
-
-				// Handle empty responses (e.g., from DELETE requests)
-				const contentType = response.headers.get('content-type')
-				if (contentType && contentType.includes('application/json')) {
-					try {
-						return await response.json()
-					} catch (cause) {
-						// Carrying the status matters more than it looks. Zendesk answered, so
-						// this is not a request that failed to complete — and without a status
-						// the retry policy would read it as exactly that and ask again, re-sending
-						// something that already arrived on the strength of a body we could not
-						// parse. 200 is not in the retryable set, so it fails once and says why.
-						throw new ZendeskRequestError(
-							`Zendesk answered ${response.status} with a body that is not valid JSON`,
-							response.status,
-							undefined,
-							{ cause }
-						)
-					}
-				} else {
-					return { success: true }
-				}
-			} finally {
-				clearTimeout(timeoutId)
+			} else {
+				return { success: true }
 			}
 		} catch (error) {
 			// Re-throw with more context, preserving original error chain for debugging.
@@ -338,6 +345,11 @@ export class ZendeskClient {
 				)
 			}
 			throw error
+		} finally {
+			// One place rather than two. The timer used to be cleared on the line after `await
+			// fetch` as well, which covered every path that got an answer but not the one where
+			// fetch rejects outright — the path requestWithRetry walks up to three times a call.
+			clearTimeout(timeoutId)
 		}
 	}
 
