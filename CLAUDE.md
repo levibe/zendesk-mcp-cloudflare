@@ -33,6 +33,18 @@ Origin checking arrived with the same handler and is worth knowing about separat
 
 What the default permits a browser depends on the deployment, which is the part that catches people out. It accepts localhost, and additionally the endpoint's own hostname when that is a `workers.dev` address; a custom domain therefore allows localhost and nothing else. Any other origin gets a 403 naming the origin and saying nothing about transports. `allowedOriginHostnames` is where to widen it, one hostname at a time rather than `'*'`.
 
+### The tool list's TTL is the only staleness bound
+
+`tools/list` is cached, through `cacheHints` on the `McpServer` constructor in `src/index.ts`, where the TTL and the reasoning for it sit together. Revision 2026-07-28 requires `ttlMs` and `cacheScope` on every cacheable result, and the SDK fills them with `ttlMs: 0` when nobody says otherwise — the fields present and the feature off, which is the right default for a server it knows nothing about. This list earns better, because it does not vary: `toolCategories` is a fixed literal, both allowlists are compile-time constants, and registration never consults the authenticated user, so two clients signed in as different people get identical bytes. Deterministic ordering, which the revision asks for in the same breath, falls out of registration walking the categories in declaration order — worth knowing before someone adds a sort to "fix" it.
+
+The number is the part to be careful with, because a TTL here is not a hint that a client may re-check sooner. It is the only bound on staleness there is, since this server cannot tell a client the list changed. `tools/list_changed` reaches a client over `subscriptions/listen`, which needs a long-lived handler holding an event bus, and the handler is built inside `fetch`, so every request gets a fresh bus with no subscribers. Hoisting it would not fix that either: the bus is in-memory and per-isolate, so it would reach only the clients that happened to land on the isolate where something changed. Notification across a Workers deployment is a harder problem than it looks, and not one worth solving for a list that changes a few times a year. So read the TTL as an answer to "how long may a client go on offering a tool we have removed", and raise it only with that question in view.
+
+Only clients on 2026-07-28 are affected either way. The fields are filled at the modern codec's encode seam, so a request arriving without the envelope — the ones `legacy: 'stateless'` still answers — carries no cache fields at all and re-lists every time. Nothing to fix there; it is just not the whole of the traffic that the TTL governs.
+
+A stale list is a staleness problem rather than a security one, which is the reassuring half. Registration re-runs per request, so a tool dropped from `WRITE_TOOLS_ENABLED` stops existing the moment the new code is live. A client holding the old list can still see it, and gets `Tool not found` when it calls, because the publication policy is enforced at call time and not by what the list happens to say.
+
+`cacheScope` is `private` deliberately. The body is identical for every caller, which is the test `public` actually applies, but `public` would add only sharing through an intermediary and there is none here — the connector fetches server-side and `mcp-remote` runs per user. Per-deployment configuration would keep that true, since a deployment is one URL with one list; a per-user permission model would not, which is the thing to re-check if #20 lands.
+
 ### Key Files
 
 - `src/index.ts` - Main entry point integrating OAuth and Zendesk functionality
