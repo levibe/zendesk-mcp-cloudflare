@@ -8,6 +8,7 @@ import {
 	updateArticleSchema,
 } from '../types/zendesk'
 import { createTool } from '../utils/tool-registry'
+import { requireChanges } from '../utils/require-changes'
 import { executeSearchWithStandardizedResponse } from '../utils/search-response'
 import { isRecord } from '../utils/narrow'
 
@@ -496,13 +497,7 @@ export const helpCenterTools: ToolDefinition[] = [
 		"Update a Help Center article's content. Any field left out keeps its current value. This cannot publish a draft, and cannot change who is allowed to see the article.",
 		{ id: idSchema.describe('Article ID to update'), ...updateArticleSchema },
 		async (client, { id, ...changes }) => {
-			// Zendesk accepts an empty update and changes nothing, which reads as success. Say what
-			// happened instead, since a model that sent no fields meant to send some.
-			if (Object.keys(changes).length === 0) {
-				throw new Error(
-					`update_article needs at least one field to change: ${Object.keys(updateArticleSchema).join(', ')}.`
-				)
-			}
+			requireChanges('update_article', updateArticleSchema, changes)
 
 			return client.updateArticle(id, changes)
 		},
