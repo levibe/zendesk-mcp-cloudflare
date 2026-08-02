@@ -14,6 +14,7 @@ import {
 	updateAutomationSchema,
 } from '../types/zendesk'
 import { createTool } from '../utils/tool-registry'
+import { requireChanges } from '../utils/require-changes'
 
 export const automationsTools: ToolDefinition[] = [
 	createTool(
@@ -49,13 +50,7 @@ export const automationsTools: ToolDefinition[] = [
 		'Update an existing automation. Any field left out keeps its current value, except that sending conditions or actions replaces that whole set rather than adding to it. This cannot enable or disable an automation.',
 		{ id: idSchema.describe('Automation ID to update'), ...updateAutomationSchema },
 		async (client, { id, ...changes }) => {
-			// Zendesk accepts an empty update and changes nothing, which reads as success. Say what
-			// happened instead, since a model that sent no fields meant to send some.
-			if (Object.keys(changes).length === 0) {
-				throw new Error(
-					`update_automation needs at least one field to change: ${Object.keys(updateAutomationSchema).join(', ')}.`
-				)
-			}
+			requireChanges('update_automation', updateAutomationSchema, changes)
 
 			return client.updateAutomation(id, changes)
 		},
