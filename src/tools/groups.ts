@@ -5,7 +5,6 @@
 import type { ToolDefinition } from '../types/zendesk'
 import { paginationSchema, idSchema, nameSchema, descriptionSchema } from '../types/zendesk'
 import { createTool } from '../utils/tool-registry'
-import { withCreateHandling } from '../utils/error-handling'
 
 export const groupsTools: ToolDefinition[] = [
 	createTool(
@@ -34,7 +33,8 @@ export const groupsTools: ToolDefinition[] = [
 			description: descriptionSchema.describe('Group description'),
 		},
 		async (client, params) => {
-			return withCreateHandling(() => client.createGroup(params), 'Group')()
-		}
+			return client.createGroup(params)
+		},
+		'Group created successfully!'
 	),
 ]

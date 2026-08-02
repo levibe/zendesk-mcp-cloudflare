@@ -4,12 +4,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest'
-import {
-	withCreateHandling,
-	withDeleteHandling,
-	withErrorHandling,
-	withUpdateHandling,
-} from './error-handling'
+import { withErrorHandling } from './error-handling'
 
 const textOf = (response: { content: Array<{ text: string }> }) => response.content[0].text
 
@@ -36,8 +31,9 @@ describe('withErrorHandling', () => {
 		)
 	})
 
-	// The string branch returns before the success message is ever consulted, so a handler
-	// that already words its own answer keeps it rather than getting a second heading.
+	// The string branch returns before the success message is ever consulted, so a handler that
+	// already words its own answer keeps it rather than getting a second heading. `delete_ticket`
+	// is the tool relying on this: it has an empty body to report and names the id instead.
 	it('ignores the success message when the result is already a string', async () => {
 		const handler = withErrorHandling(async () => 'Already worded', 'Ticket created successfully!')
 
@@ -82,54 +78,27 @@ describe('withErrorHandling', () => {
 
 	// JSON.stringify(undefined) is undefined rather than a string, so this leaves `text`
 	// unset on a response typed as always having one. No tool returns undefined today —
-	// the create, update and delete wrappers all resolve to a string — but nothing stops one.
+	// every write either hands back a record or words its own sentence — but nothing stops one.
 	it('leaves the text unset when the wrapped function resolves to undefined', async () => {
 		const handler = withErrorHandling(async () => undefined)
 
 		expect(textOf(await handler())).toBeUndefined()
 	})
-})
 
-describe('withDeleteHandling', () => {
-	it('reports the deletion instead of the empty body it got back', async () => {
-		const remove = vi.fn(async () => ({ success: true }))
+	// What #28 was actually about. A handler that built its own response used to be wrapped a
+	// second time here, and this is what the client got: the inner response pretty-printed as
+	// text, with the `isError` that said the write failed encoded inside it rather than set on
+	// the response. Nothing downstream could tell the failure from a success.
+	it('encodes a response handed to it as text, losing the isError on it', async () => {
+		const alreadyShaped = {
+			content: [{ type: 'text' as const, text: 'Error: 422 - RecordInvalid' }],
+			isError: true,
+		}
+		const handler = withErrorHandling(async () => alreadyShaped)
 
-		const response = await withDeleteHandling(remove, 'Ticket', 42)()
+		const response = await handler()
 
-		expect(remove).toHaveBeenCalled()
-		expect(textOf(response)).toBe('Ticket 42 deleted successfully!')
-	})
-
-	it('reports a failed deletion as an error', async () => {
-		const response = await withDeleteHandling(
-			async () => {
-				throw new Error('Zendesk API Error: 404 - RecordNotFound')
-			},
-			'Ticket',
-			42
-		)()
-
-		expect(response.isError).toBe(true)
-		expect(textOf(response)).toBe('Error: Zendesk API Error: 404 - RecordNotFound')
-	})
-})
-
-describe('withCreateHandling', () => {
-	it('heads the created record with a success message', async () => {
-		const response = await withCreateHandling(async () => ({ id: 42 }), 'Ticket')()
-
-		expect(textOf(response)).toBe(
-			`Ticket created successfully!\n\n${JSON.stringify({ id: 42 }, null, 2)}`
-		)
-	})
-})
-
-describe('withUpdateHandling', () => {
-	it('heads the updated record with a success message', async () => {
-		const response = await withUpdateHandling(async () => ({ id: 42 }), 'Ticket')()
-
-		expect(textOf(response)).toBe(
-			`Ticket updated successfully!\n\n${JSON.stringify({ id: 42 }, null, 2)}`
-		)
+		expect(response.isError).toBeUndefined()
+		expect(textOf(response)).toBe(JSON.stringify(alreadyShaped, null, 2))
 	})
 })

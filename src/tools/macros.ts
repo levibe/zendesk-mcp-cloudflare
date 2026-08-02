@@ -25,19 +25,15 @@ export const macrosTools: ToolDefinition[] = [
 		}
 	),
 
-	/**
-	 * Both writes hand back the macro Zendesk returns, exactly as the reads above do, rather
-	 * than calling `withCreateHandling` or `withUpdateHandling` for a worded confirmation.
-	 *
-	 * Those wrappers each build a finished McpToolResponse, and `registerTools` wraps every
-	 * handler in `withErrorHandling` again — so the inner response is JSON-encoded inside the
-	 * outer one and its `isError` flag never reaches the client, which would report a write
-	 * Zendesk rejected as a successful call. The other write tools still do this; it is
-	 * invisible while they are all withheld, and #28 unpicks it for them.
-	 */
-	createTool('create_macro', 'Create a new macro', createMacroSchema, async (client, params) => {
-		return client.createMacro(params)
-	}),
+	createTool(
+		'create_macro',
+		'Create a new macro',
+		createMacroSchema,
+		async (client, params) => {
+			return client.createMacro(params)
+		},
+		'Macro created successfully!'
+	),
 
 	createTool(
 		'update_macro',
@@ -55,6 +51,7 @@ export const macrosTools: ToolDefinition[] = [
 			}
 
 			return client.updateMacro(id, changes)
-		}
+		},
+		'Macro updated successfully!'
 	),
 ]

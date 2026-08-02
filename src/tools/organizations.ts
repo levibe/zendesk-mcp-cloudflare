@@ -13,7 +13,6 @@ import {
 	descriptionSchema,
 } from '../types/zendesk'
 import { createTool } from '../utils/tool-registry'
-import { withCreateHandling } from '../utils/error-handling'
 import { executeSearchWithStandardizedResponse } from '../utils/search-response'
 
 export const organizationsTools: ToolDefinition[] = [
@@ -46,8 +45,9 @@ export const organizationsTools: ToolDefinition[] = [
 			tags: tagsSchema.describe('Tags for the organization'),
 		},
 		async (client, params) => {
-			return withCreateHandling(() => client.createOrganization(params), 'Organization')()
-		}
+			return client.createOrganization(params)
+		},
+		'Organization created successfully!'
 	),
 
 	createTool(
