@@ -27,16 +27,59 @@ type ZendeskEnv = Pick<Env, 'ZENDESK_SUBDOMAIN' | 'ZENDESK_EMAIL' | 'ZENDESK_API
  * It exists so that the status survives being turned into a sentence. `request` builds its
  * message out of the response body, and the classifier used to search that message for '429'
  * and friends — which cannot tell a status from the same three digits quoted in a body.
+ *
+ * `retryAfterMs` is there for the same reason and carries the same kind of fact: something
+ * the response said that the message would otherwise throw away. It holds what `Retry-After`
+ * asked for, and is undefined when the response did not ask for anything usable.
  */
 export class ZendeskRequestError extends Error {
 	constructor(
 		message: string,
 		readonly status?: number,
+		readonly retryAfterMs?: number,
 		options?: ErrorOptions
 	) {
 		super(message, options)
 		this.name = 'ZendeskRequestError'
 	}
+}
+
+/**
+ * How long `Retry-After` asked us to wait, in milliseconds, or undefined if it said nothing
+ * usable.
+ *
+ * The header is defined as either a whole number of seconds or an HTTP date. Zendesk sends
+ * seconds, and both are read anyway — the date form costs four lines, and implementing half
+ * a header without saying so is a worse thing to leave behind than the four lines.
+ */
+function parseRetryAfter(header: string | null): number | undefined {
+	if (!header) {
+		return undefined
+	}
+
+	const value = header.trim()
+	let wait: number
+
+	if (/^\d+$/.test(value)) {
+		// The numeric form is a whole number of seconds. Matched with a regex rather than
+		// passed to Number(), which would also read '1e3' and '0x10' as a count of seconds.
+		wait = Number(value) * 1000
+	} else {
+		// Otherwise an HTTP date. `Date.parse` is far looser here than it looks — it reads
+		// '-5' as May 2001 and '120' as the year 120 — so it cannot be relied on to reject
+		// nonsense. What makes that safe is the check below, not a tighter pattern up here.
+		const when = Date.parse(value)
+		if (Number.isNaN(when)) {
+			return undefined
+		}
+		wait = when - Date.now()
+	}
+
+	// Only a wait in the future is usable. A header resolving to zero or to the past tells us
+	// nothing about how long to hold off, and reading it as "retry now" would be the single
+	// worst answer available: asking again immediately against a quota already exhausted.
+	// Falling back to the caller's own backoff is safer, and is what an absent header does.
+	return wait > 0 ? wait : undefined
 }
 
 /**
@@ -95,6 +138,19 @@ function* causeChain(error: unknown, maxDepth = 10): Generator<Error> {
 		yield current
 		current = current.cause
 	}
+}
+
+/**
+ * The wait Zendesk asked for, if any link in the chain carries one. Walks it for the same
+ * reason the classifier does: `request` rewraps, so the answer sits a link or two down.
+ */
+function retryAfterFrom(error: unknown): number | undefined {
+	for (const link of causeChain(error)) {
+		if (link instanceof ZendeskRequestError && link.retryAfterMs !== undefined) {
+			return link.retryAfterMs
+		}
+	}
+	return undefined
 }
 
 export class ZendeskClient {
@@ -238,7 +294,8 @@ export class ZendeskClient {
 					const errorText = await response.text()
 					throw new ZendeskRequestError(
 						`Zendesk API Error: ${response.status} - ${errorText}`,
-						response.status
+						response.status,
+						parseRetryAfter(response.headers.get('retry-after'))
 					)
 				}
 
@@ -256,6 +313,7 @@ export class ZendeskClient {
 						throw new ZendeskRequestError(
 							`Zendesk answered ${response.status} with a body that is not valid JSON`,
 							response.status,
+							undefined,
 							{ cause }
 						)
 					}
@@ -267,12 +325,15 @@ export class ZendeskClient {
 			}
 		} catch (error) {
 			// Re-throw with more context, preserving original error chain for debugging.
-			// The status is carried onto the new error rather than left behind in the message,
-			// so a caller holding what request threw can read it without walking `cause`.
+			// What the response told us is carried onto the new error rather than left behind
+			// in the message, so a caller holding what request threw can read it without
+			// walking `cause`.
 			if (error instanceof Error) {
+				const answered = error instanceof ZendeskRequestError ? error : undefined
 				throw new ZendeskRequestError(
 					`Zendesk request failed: ${error.message}`,
-					error instanceof ZendeskRequestError ? error.status : undefined,
+					answered?.status,
+					answered?.retryAfterMs,
 					{ cause: error }
 				)
 			}
@@ -355,16 +416,28 @@ export class ZendeskClient {
 				}
 
 				// Calculate exponential backoff delay: 1s, 2s, 4s (capped at 5s)
-				const delay = Math.min(1000 * Math.pow(2, attempt), 5000)
+				const backoff = Math.min(1000 * Math.pow(2, attempt), 5000)
+
+				// A rate limit says how long to wait, and asking again sooner is worse than not
+				// asking at all: the early retry spends more of a quota already exhausted, and
+				// providers commonly extend the penalty for a caller that keeps knocking. The
+				// ladder is the fallback for the responses that say nothing.
+				const requested = retryAfterFrom(error)
+				const delay = requested ?? backoff
 
 				// Decide whether the next attempt fits before sleeping, rather than sleeping and
 				// then discovering it does not. Waiting out a backoff only to send a request the
 				// deadline aborts on arrival wastes the one thing the caller is short of.
+				//
+				// This is also the only cap on `Retry-After`, and the right one. Asked to wait
+				// 60 seconds inside a 30 second budget, the honest answer is to stop and say so,
+				// not to clamp the wait down to something Zendesk did not agree to.
 				if (Date.now() + delay + MINIMUM_ATTEMPT_MS > deadline) {
 					console.warn(
-						`Request failed (attempt ${attempt + 1}/${maxRetries}) and the ${TOTAL_TIMEOUT_MS}ms deadline leaves no room to retry`,
+						`Request failed (attempt ${attempt + 1}/${maxRetries}) and the ${TOTAL_TIMEOUT_MS}ms deadline leaves no room to wait ${delay}ms and retry`,
 						{
 							error: error instanceof Error ? error.message : String(error),
+							retryAfterMs: requested,
 							method,
 							endpoint,
 						}

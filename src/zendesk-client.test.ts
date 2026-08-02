@@ -578,3 +578,107 @@ describe('requestWithRetry', () => {
 		expect(fetchMock).toHaveBeenCalledTimes(2)
 	})
 })
+
+describe('Retry-After', () => {
+	const rateLimited = (retryAfter: string) =>
+		new Response('Number of allowed API requests per minute exceeded', {
+			status: 429,
+			headers: { 'retry-after': retryAfter },
+		})
+
+	it('is carried on the error, next to the status', async () => {
+		stubFetch(async () => rateLimited('30'))
+
+		await expect(client.request('GET', '/tickets.json')).rejects.toHaveProperty(
+			'retryAfterMs',
+			30_000
+		)
+	})
+
+	// The ladder would have asked again at one second. Retrying sooner than you were told to
+	// is worse than not retrying: it spends more of a quota already exhausted, and providers
+	// commonly extend the penalty for a caller that keeps knocking.
+	it('is waited out instead of the client running its own ladder', async () => {
+		const fetchMock = stubFetch(async () => rateLimited('5'))
+
+		const attempt = client.requestWithRetry('GET', '/tickets.json')
+		const rejects = expect(attempt).rejects.toThrow('Zendesk API Error: 429')
+
+		await vi.advanceTimersByTimeAsync(4_999)
+		expect(fetchMock).toHaveBeenCalledTimes(1)
+
+		await vi.advanceTimersByTimeAsync(1)
+		expect(fetchMock).toHaveBeenCalledTimes(2)
+
+		await vi.advanceTimersByTimeAsync(5_000)
+		await rejects
+		expect(fetchMock).toHaveBeenCalledTimes(3)
+	})
+
+	// The deadline from #32 is the only cap on this, and the right one. Clamping a 60 second
+	// wait down to something Zendesk never agreed to would defeat the point of reading the
+	// header, so the honest answer to a wait that will not fit the budget is to stop.
+	it('ends the call when the wait it asks for exceeds the deadline', async () => {
+		const fetchMock = stubFetch(async () => rateLimited('60'))
+
+		await expect(client.requestWithRetry('GET', '/tickets.json')).rejects.toThrow(
+			'Zendesk API Error: 429'
+		)
+
+		expect(fetchMock).toHaveBeenCalledTimes(1)
+		expect(vi.getTimerCount()).toBe(0)
+	})
+
+	// Zendesk sends seconds, but the header is defined as seconds or an HTTP date, and
+	// reading only half of it without saying so is the kind of gap that gets found in
+	// production rather than here.
+	it('understands the date form as well as the seconds form', async () => {
+		vi.setSystemTime(new Date('2026-08-01T12:00:00Z'))
+		const fetchMock = stubFetch(async () => rateLimited('Sat, 01 Aug 2026 12:00:04 GMT'))
+
+		const attempt = client.requestWithRetry('GET', '/tickets.json')
+		const rejects = expect(attempt).rejects.toThrow('Zendesk API Error: 429')
+
+		await vi.advanceTimersByTimeAsync(3_999)
+		expect(fetchMock).toHaveBeenCalledTimes(1)
+
+		await vi.advanceTimersByTimeAsync(1)
+		expect(fetchMock).toHaveBeenCalledTimes(2)
+
+		await drainBackoff()
+		await rejects
+	})
+
+	/**
+	 * None of these says anything usable about how long to wait, so the ladder answers and the
+	 * first retry lands at one second.
+	 *
+	 * The last three are why the guard is a positive-wait check rather than a tighter pattern.
+	 * `Date.parse` reads '-5' as May 2001 and '120' as the year 120, so it cannot be trusted
+	 * to reject nonsense on its own — and a header that resolves into the past would otherwise
+	 * mean "retry now", which against an exhausted quota is the one answer worth avoiding.
+	 */
+	it.each([
+		['a word', 'soon'],
+		['an empty header', ''],
+		['exponential notation', '1e3'],
+		['zero seconds', '0'],
+		['a negative number', '-5'],
+		['a date already past', 'Sat, 01 Aug 2026 11:59:00 GMT'],
+	])('falls back to the ladder for %s', async (_label, header) => {
+		vi.setSystemTime(new Date('2026-08-01T12:00:00Z'))
+		const fetchMock = stubFetch(async () => rateLimited(header))
+
+		const attempt = client.requestWithRetry('GET', '/tickets.json')
+		const rejects = expect(attempt).rejects.toThrow('Zendesk API Error: 429')
+
+		await vi.advanceTimersByTimeAsync(999)
+		expect(fetchMock).toHaveBeenCalledTimes(1)
+
+		await vi.advanceTimersByTimeAsync(1)
+		expect(fetchMock).toHaveBeenCalledTimes(2)
+
+		await drainBackoff()
+		await rejects
+	})
+})
