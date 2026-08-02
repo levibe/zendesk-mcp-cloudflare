@@ -16,6 +16,7 @@ import {
 	updateTriggerSchema,
 } from '../types/zendesk'
 import { createTool } from '../utils/tool-registry'
+import { requireChanges } from '../utils/require-changes'
 
 export const triggersTools: ToolDefinition[] = [
 	createTool(
@@ -51,14 +52,7 @@ export const triggersTools: ToolDefinition[] = [
 		'Update an existing trigger. Any field left out keeps its current value, except that sending conditions or actions replaces that whole set rather than adding to it. This cannot enable or disable a trigger.',
 		{ id: idSchema.describe('Trigger ID to update'), ...updateTriggerSchema },
 		async (client, { id, ...changes }) => {
-			// Zendesk accepts an empty update and changes nothing, which reads as success. Say what
-			// happened instead, since a model that sent no fields meant to send some. The field
-			// names come from the schema so that one added there does not need remembering here.
-			if (Object.keys(changes).length === 0) {
-				throw new Error(
-					`update_trigger needs at least one field to change: ${Object.keys(updateTriggerSchema).join(', ')}.`
-				)
-			}
+			requireChanges('update_trigger', updateTriggerSchema, changes)
 
 			return client.updateTrigger(id, changes)
 		},
