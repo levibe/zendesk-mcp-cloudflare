@@ -31,6 +31,20 @@ const jsonResponse = (body: unknown) =>
 
 const failedResponse = (status: number, body: string) => new Response(body, { status })
 
+/**
+ * A response whose status arrives but whose body does not. The headers are in hand and the
+ * stream then errors, which is how a connection dropped mid-body reaches the client.
+ */
+const unreadableResponse = (status: number) =>
+	new Response(
+		new ReadableStream({
+			start(controller) {
+				controller.error(new TypeError('body stream error'))
+			},
+		}),
+		{ status }
+	)
+
 const redirectResponse = (status: number, location?: string) =>
 	new Response(null, { status, headers: location ? { location } : {} })
 
@@ -46,6 +60,24 @@ const stubFetch = (respond: (url: string, init: SentRequest) => Promise<Response
 
 const urlOf = (fetchMock: ReturnType<typeof stubFetch>, call = 0) => fetchMock.mock.calls[call][0]
 const sent = (fetchMock: ReturnType<typeof stubFetch>, call = 0) => fetchMock.mock.calls[call][1]
+
+/**
+ * A request that never answers, rejecting the way fetch does once its signal is aborted.
+ *
+ * Both Node and workerd reject with a DOMException rather than a renamed Error, and that it
+ * is an Error at all is what lets causeChain walk to it, so the real type is pinned here.
+ * The wording is workerd's, taken from a probe against the runtime rather than guessed —
+ * note it has no trailing full stop, where Node's does.
+ */
+const stubUnanswered = () =>
+	stubFetch(
+		(_url, init) =>
+			new Promise<Response>((_resolve, reject) => {
+				init.signal.addEventListener('abort', () => {
+					reject(new DOMException('The operation was aborted', 'AbortError'))
+				})
+			})
+	)
 
 /** Advances past both backoff waits — 1s after the first failure, 2s after the second. */
 const drainBackoff = () => vi.advanceTimersByTimeAsync(3000)
@@ -247,6 +279,20 @@ describe('request', () => {
 		await expect(failure).rejects.toHaveProperty('status', 429)
 	})
 
+	it('carries the status even when the body it answered with will not parse', async () => {
+		stubFetch(
+			async () =>
+				new Response('<html>maintenance</html>', {
+					headers: { 'content-type': 'application/json' },
+				})
+		)
+
+		const failure = client.request('GET', '/tickets.json')
+
+		await expect(failure).rejects.toThrow('Zendesk answered 200 with a body that is not valid JSON')
+		await expect(failure).rejects.toHaveProperty('status', 200)
+	})
+
 	it('leaves the status unset when the request never got an answer', async () => {
 		stubFetch(async () => {
 			throw new TypeError('fetch failed')
@@ -336,26 +382,12 @@ describe('a redirect', () => {
 })
 
 describe('the 30 second timeout', () => {
-	/** Never answers; rejects the way fetch does once its signal is aborted. */
-	const stubUnanswered = () =>
-		stubFetch(
-			(_url, init) =>
-				new Promise<Response>((_resolve, reject) => {
-					init.signal.addEventListener('abort', () => {
-						// Both Node and workerd reject with a DOMException, not a renamed Error. That it
-						// is an Error at all is what lets causeChain walk to it, so pin the real type.
-						const aborted = new DOMException('The operation was aborted.', 'AbortError')
-						reject(aborted)
-					})
-				})
-		)
-
 	it('aborts a request that has not answered', async () => {
 		stubUnanswered()
 
 		const attempt = client.request('GET', '/tickets.json')
 		const rejects = expect(attempt).rejects.toThrow(
-			'Zendesk request failed: The operation was aborted.'
+			'Zendesk request failed: The operation was aborted'
 		)
 
 		await vi.advanceTimersByTimeAsync(29_999)
@@ -412,32 +444,142 @@ describe('requestWithRetry', () => {
 		}
 	)
 
-	// fetch reports a socket failure as a bare "fetch failed" with the real error as its
-	// cause, so the code that identifies it is a link down the chain rather than in hand.
-	it.each(['ECONNRESET', 'ETIMEDOUT', 'ECONNREFUSED'])(
-		'retries a connection that failed with %s',
-		async (code) => {
-			const fetchMock = stubFetch(async () => {
-				throw new TypeError('fetch failed', {
-					cause: Object.assign(new Error(`read ${code}`), { code }),
-				})
-			})
-
-			const attempt = client.requestWithRetry('GET', '/tickets.json')
-			const rejects = expect(attempt).rejects.toThrow('fetch failed')
-			await drainBackoff()
-			await rejects
-
-			expect(fetchMock).toHaveBeenCalledTimes(3)
-		}
-	)
-
-	it('does not retry a connection error with no code to go on', async () => {
+	/**
+	 * The shapes a failed connection actually arrives in. They differ by runtime and share
+	 * nothing worth matching on, which is the whole of #29.
+	 *
+	 * The first two are undici's, as Node and Vitest produce them — a bare "fetch failed" with
+	 * the real socket error as its cause, carrying the `code` the old classifier looked for.
+	 * The rest were probed against workerd, which is what actually serves production: an
+	 * unreachable port is a plain `Error` reading "Network connection lost." with no `code` at
+	 * all, and a host that will not resolve is an opaque reference id. None of the last three
+	 * matched anything the old rule knew about, so all three went unretried where it counted.
+	 *
+	 * What they do share is that no response came back, and that is now what is asked.
+	 */
+	it.each([
+		[
+			'undici reporting a reset socket',
+			() =>
+				new TypeError('fetch failed', {
+					cause: Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }),
+				}),
+		],
+		[
+			'undici reporting a refused connection',
+			() =>
+				new TypeError('fetch failed', {
+					cause: Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }),
+				}),
+		],
+		['workerd losing the connection', () => new Error('Network connection lost.')],
+		[
+			'workerd failing to resolve the host',
+			() => new Error('internal error; reference = lfgpejlogahfrh23do9e5eib'),
+		],
+		// This one inverted with #29, and the inversion is the point. It used to assert a
+		// single attempt, on the grounds that there was no code to go on — which describes
+		// every dropped connection workerd will ever report.
+		['a bare fetch failure with nothing beneath it', () => new TypeError('fetch failed')],
+	])('retries %s', async (_label, makeError) => {
 		const fetchMock = stubFetch(async () => {
-			throw new TypeError('fetch failed')
+			throw makeError()
 		})
 
-		await expect(client.requestWithRetry('GET', '/tickets.json')).rejects.toThrow('fetch failed')
+		const attempt = client.requestWithRetry('GET', '/tickets.json')
+		const rejects = expect(attempt).rejects.toThrow('Zendesk request failed')
+		await drainBackoff()
+		await rejects
+
+		expect(fetchMock).toHaveBeenCalledTimes(3)
+	})
+
+	// A missing credential also produces no status, so it would be indistinguishable from a
+	// lost connection if `request` still wrapped it. It is thrown before the try for exactly
+	// this reason: three seconds of backoff cannot conjure a token that was never set.
+	it('does not retry a missing credential', async () => {
+		const fetchMock = stubFetch(async () => jsonResponse({}))
+		const unconfigured = new ZendeskClient({ ...credentials, apiToken: '' })
+
+		await expect(unconfigured.requestWithRetry('GET', '/tickets.json')).rejects.toThrow(
+			'Zendesk credentials not configured'
+		)
+
+		expect(fetchMock).not.toHaveBeenCalled()
+	})
+
+	/**
+	 * The same shape as the missing credential above, and the reason the try starts where it
+	 * does rather than at the top of `request`.
+	 *
+	 * Preparing a request can fail, and none of those failures mean "nothing came back" —
+	 * they mean nothing was sent. `btoa` rejects any credential holding a character outside
+	 * Latin-1, which is what a token pasted with a smart quote looks like, and JSON.stringify
+	 * rejects a body it cannot serialize. Wrapped as ZendeskRequestErrors they would be
+	 * indistinguishable from a dropped connection and asked three times over.
+	 *
+	 * Staying a plain Error is the mechanism, so that is what these assert, alongside fetch
+	 * never being reached and no timer being left behind.
+	 */
+	it('does not retry a credential btoa cannot encode', async () => {
+		const fetchMock = stubFetch(async () => jsonResponse({}))
+		// A smart quote, which is what a token pasted out of a document or a chat carries.
+		const smartQuoted = new ZendeskClient({ ...credentials, apiToken: 'abc’def' })
+
+		const failure = smartQuoted.requestWithRetry('GET', '/tickets.json')
+
+		// Pinned by name rather than left at "something threw", so that an unrelated failure
+		// inside requestWithRetry cannot pass as this one. The name is the stable half of a
+		// DOMException across Node and workerd; the message wording is not.
+		await expect(failure).rejects.toHaveProperty('name', 'InvalidCharacterError')
+		await expect(failure).rejects.not.toBeInstanceOf(ZendeskRequestError)
+		expect(fetchMock).not.toHaveBeenCalled()
+		expect(vi.getTimerCount()).toBe(0)
+	})
+
+	it('does not retry a body that will not serialize', async () => {
+		const fetchMock = stubFetch(async () => jsonResponse({}))
+		const circular: Record<string, unknown> = {}
+		circular.self = circular
+
+		const failure = client.requestWithRetry('POST', '/tickets.json', circular)
+
+		await expect(failure).rejects.toThrow(/circular/i)
+		await expect(failure).rejects.not.toBeInstanceOf(ZendeskRequestError)
+		expect(fetchMock).not.toHaveBeenCalled()
+		expect(vi.getTimerCount()).toBe(0)
+	})
+
+	// Zendesk answered, so this is not a request that failed to complete. The status is put on
+	// the error to say so — without it, the rule above would send the request a second time,
+	// re-asking for something that already arrived because its body would not parse.
+	it('does not retry a body that will not parse', async () => {
+		const fetchMock = stubFetch(
+			async () =>
+				new Response('<html>maintenance</html>', {
+					headers: { 'content-type': 'application/json' },
+				})
+		)
+
+		await expect(client.requestWithRetry('GET', '/tickets.json')).rejects.toThrow(
+			'Zendesk answered 200 with a body that is not valid JSON'
+		)
+
+		expect(fetchMock).toHaveBeenCalledTimes(1)
+	})
+
+	// The sibling of the case above, on the failure branch rather than the success one, and
+	// the one that got missed. A body is a stream, so reading it can fail after the status is
+	// already in hand. Letting that propagate would hand the outer catch a plain Error, which
+	// it rewraps carrying no status — and the rule below reads a statusless error as a request
+	// that never got an answer, so a flatly refused 400 would go out twice more. Asserting on
+	// the count is the point; the message only shows the status survived to be reported.
+	it('does not retry a 400 whose body cannot be read', async () => {
+		const fetchMock = stubFetch(async () => unreadableResponse(400))
+
+		await expect(client.requestWithRetry('GET', '/tickets.json')).rejects.toThrow(
+			'Zendesk API Error: 400'
+		)
 
 		expect(fetchMock).toHaveBeenCalledTimes(1)
 	})
@@ -469,38 +611,72 @@ describe('requestWithRetry', () => {
 		expect(fetchMock).toHaveBeenCalledTimes(1)
 	})
 
-	// This was #17. The AbortError is two links down the chain once `request` has rewrapped
-	// it, which is why the classifier walks `cause` rather than looking only at what it was
-	// handed. The step-by-step advance is the point of the test as much as the count is: a
-	// hung endpoint now costs three 30s waits plus the backoff before it gives up.
-	it('retries a request the 30 second timeout aborted', async () => {
-		const fetchMock = stubFetch(
-			(_url, init) =>
-				new Promise<Response>((_resolve, reject) => {
-					init.signal.addEventListener('abort', () => {
-						// Both Node and workerd reject with a DOMException, not a renamed Error. That it
-						// is an Error at all is what lets causeChain walk to it, so pin the real type.
-						const aborted = new DOMException('The operation was aborted.', 'AbortError')
-						reject(aborted)
-					})
+	// This was #17, and it inverted with #32. It used to advance step by step through three
+	// 30s attempts and two backoffs, roughly 93 seconds, precisely so the cost was visible.
+	// The deadline covers the whole call now, so a hung endpoint spends it on the first
+	// attempt and there is nothing left to retry into — 30 seconds, as it was before #24 made
+	// retrying a timeout possible. The AbortError is still two links down the chain, which is
+	// why the classifier walks `cause` rather than reading only what it was handed.
+	it('does not retry a hung request, because one attempt spends the whole deadline', async () => {
+		const fetchMock = stubUnanswered()
+
+		const attempt = client.requestWithRetry('GET', '/tickets.json')
+		const rejects = expect(attempt).rejects.toThrow('The operation was aborted')
+
+		await vi.advanceTimersByTimeAsync(30_000)
+		await rejects
+
+		expect(fetchMock).toHaveBeenCalledTimes(1)
+		expect(vi.getTimerCount()).toBe(0)
+	})
+
+	// The second attempt inherits what is left rather than starting its own 30 seconds, so
+	// the whole call still lands on the deadline instead of at 61 seconds.
+	it('gives a later attempt only the time the deadline has left', async () => {
+		let calls = 0
+		const fetchMock = stubFetch((_url, init) => {
+			calls += 1
+			if (calls === 1) return Promise.resolve(failedResponse(503, 'unavailable'))
+			return new Promise<Response>((_resolve, reject) => {
+				init.signal.addEventListener('abort', () => {
+					reject(new DOMException('The operation was aborted', 'AbortError'))
 				})
+			})
+		})
+
+		const attempt = client.requestWithRetry('GET', '/tickets.json')
+		const rejects = expect(attempt).rejects.toThrow('The operation was aborted')
+
+		await vi.advanceTimersByTimeAsync(1_000) // backoff, then the second attempt starts
+		expect(fetchMock).toHaveBeenCalledTimes(2)
+
+		// 29s more reaches the deadline, not 30 — the second attempt started a second late.
+		await vi.advanceTimersByTimeAsync(28_999)
+		await vi.advanceTimersByTimeAsync(1)
+		await rejects
+
+		expect(fetchMock).toHaveBeenCalledTimes(2)
+		expect(vi.getTimerCount()).toBe(0)
+	})
+
+	// The decision is taken before the sleep rather than after it. Waiting out a backoff only
+	// to send a request that gets aborted on arrival spends the one thing the caller is short
+	// of, and reports the failure a second later than it was already known.
+	it('stops instead of sleeping into a retry the deadline cannot fit', async () => {
+		const fetchMock = stubFetch(
+			() =>
+				new Promise<Response>((resolve) =>
+					setTimeout(() => resolve(failedResponse(503, 'unavailable')), 29_000)
+				)
 		)
 
 		const attempt = client.requestWithRetry('GET', '/tickets.json')
-		const rejects = expect(attempt).rejects.toThrow('The operation was aborted.')
+		const rejects = expect(attempt).rejects.toThrow('Zendesk API Error: 503')
 
-		await vi.advanceTimersByTimeAsync(30_000) // first attempt times out
-		expect(fetchMock).toHaveBeenCalledTimes(1)
-
-		await vi.advanceTimersByTimeAsync(1_000) // backoff, then the second attempt starts
-		await vi.advanceTimersByTimeAsync(30_000)
-		expect(fetchMock).toHaveBeenCalledTimes(2)
-
-		await vi.advanceTimersByTimeAsync(2_000)
-		await vi.advanceTimersByTimeAsync(30_000)
-		expect(fetchMock).toHaveBeenCalledTimes(3)
-
+		await vi.advanceTimersByTimeAsync(29_000)
 		await rejects
+
+		expect(fetchMock).toHaveBeenCalledTimes(1)
 		expect(vi.getTimerCount()).toBe(0)
 	})
 
@@ -539,5 +715,109 @@ describe('requestWithRetry', () => {
 
 		await expect(attempt).resolves.toEqual({ tickets: [] })
 		expect(fetchMock).toHaveBeenCalledTimes(2)
+	})
+})
+
+describe('Retry-After', () => {
+	const rateLimited = (retryAfter: string) =>
+		new Response('Number of allowed API requests per minute exceeded', {
+			status: 429,
+			headers: { 'retry-after': retryAfter },
+		})
+
+	it('is carried on the error, next to the status', async () => {
+		stubFetch(async () => rateLimited('30'))
+
+		await expect(client.request('GET', '/tickets.json')).rejects.toHaveProperty(
+			'retryAfterMs',
+			30_000
+		)
+	})
+
+	// The ladder would have asked again at one second. Retrying sooner than you were told to
+	// is worse than not retrying: it spends more of a quota already exhausted, and providers
+	// commonly extend the penalty for a caller that keeps knocking.
+	it('is waited out instead of the client running its own ladder', async () => {
+		const fetchMock = stubFetch(async () => rateLimited('5'))
+
+		const attempt = client.requestWithRetry('GET', '/tickets.json')
+		const rejects = expect(attempt).rejects.toThrow('Zendesk API Error: 429')
+
+		await vi.advanceTimersByTimeAsync(4_999)
+		expect(fetchMock).toHaveBeenCalledTimes(1)
+
+		await vi.advanceTimersByTimeAsync(1)
+		expect(fetchMock).toHaveBeenCalledTimes(2)
+
+		await vi.advanceTimersByTimeAsync(5_000)
+		await rejects
+		expect(fetchMock).toHaveBeenCalledTimes(3)
+	})
+
+	// The deadline from #32 is the only cap on this, and the right one. Clamping a 60 second
+	// wait down to something Zendesk never agreed to would defeat the point of reading the
+	// header, so the honest answer to a wait that will not fit the budget is to stop.
+	it('ends the call when the wait it asks for exceeds the deadline', async () => {
+		const fetchMock = stubFetch(async () => rateLimited('60'))
+
+		await expect(client.requestWithRetry('GET', '/tickets.json')).rejects.toThrow(
+			'Zendesk API Error: 429'
+		)
+
+		expect(fetchMock).toHaveBeenCalledTimes(1)
+		expect(vi.getTimerCount()).toBe(0)
+	})
+
+	// Zendesk sends seconds, but the header is defined as seconds or an HTTP date, and
+	// reading only half of it without saying so is the kind of gap that gets found in
+	// production rather than here.
+	it('understands the date form as well as the seconds form', async () => {
+		vi.setSystemTime(new Date('2026-08-01T12:00:00Z'))
+		const fetchMock = stubFetch(async () => rateLimited('Sat, 01 Aug 2026 12:00:04 GMT'))
+
+		const attempt = client.requestWithRetry('GET', '/tickets.json')
+		const rejects = expect(attempt).rejects.toThrow('Zendesk API Error: 429')
+
+		await vi.advanceTimersByTimeAsync(3_999)
+		expect(fetchMock).toHaveBeenCalledTimes(1)
+
+		await vi.advanceTimersByTimeAsync(1)
+		expect(fetchMock).toHaveBeenCalledTimes(2)
+
+		await drainBackoff()
+		await rejects
+	})
+
+	/**
+	 * None of these says anything usable about how long to wait, so the ladder answers and the
+	 * first retry lands at one second.
+	 *
+	 * The last three are why the guard is a positive-wait check rather than a tighter pattern.
+	 * `Date.parse` reads '-5' as May 2001 and '120' as the year 120, so it cannot be trusted
+	 * to reject nonsense on its own — and a header that resolves into the past would otherwise
+	 * mean "retry now", which against an exhausted quota is the one answer worth avoiding.
+	 */
+	it.each([
+		['a word', 'soon'],
+		['an empty header', ''],
+		['exponential notation', '1e3'],
+		['zero seconds', '0'],
+		['a negative number', '-5'],
+		['a date already past', 'Sat, 01 Aug 2026 11:59:00 GMT'],
+	])('falls back to the ladder for %s', async (_label, header) => {
+		vi.setSystemTime(new Date('2026-08-01T12:00:00Z'))
+		const fetchMock = stubFetch(async () => rateLimited(header))
+
+		const attempt = client.requestWithRetry('GET', '/tickets.json')
+		const rejects = expect(attempt).rejects.toThrow('Zendesk API Error: 429')
+
+		await vi.advanceTimersByTimeAsync(999)
+		expect(fetchMock).toHaveBeenCalledTimes(1)
+
+		await vi.advanceTimersByTimeAsync(1)
+		expect(fetchMock).toHaveBeenCalledTimes(2)
+
+		await drainBackoff()
+		await rejects
 	})
 })

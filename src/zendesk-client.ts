@@ -27,16 +27,59 @@ type ZendeskEnv = Pick<Env, 'ZENDESK_SUBDOMAIN' | 'ZENDESK_EMAIL' | 'ZENDESK_API
  * It exists so that the status survives being turned into a sentence. `request` builds its
  * message out of the response body, and the classifier used to search that message for '429'
  * and friends — which cannot tell a status from the same three digits quoted in a body.
+ *
+ * `retryAfterMs` is there for the same reason and carries the same kind of fact: something
+ * the response said that the message would otherwise throw away. It holds what `Retry-After`
+ * asked for, and is undefined when the response did not ask for anything usable.
  */
 export class ZendeskRequestError extends Error {
 	constructor(
 		message: string,
 		readonly status?: number,
+		readonly retryAfterMs?: number,
 		options?: ErrorOptions
 	) {
 		super(message, options)
 		this.name = 'ZendeskRequestError'
 	}
+}
+
+/**
+ * How long `Retry-After` asked us to wait, in milliseconds, or undefined if it said nothing
+ * usable.
+ *
+ * The header is defined as either a whole number of seconds or an HTTP date. Zendesk sends
+ * seconds, and both are read anyway — the date form costs four lines, and implementing half
+ * a header without saying so is a worse thing to leave behind than the four lines.
+ */
+function parseRetryAfter(header: string | null): number | undefined {
+	if (!header) {
+		return undefined
+	}
+
+	const value = header.trim()
+	let wait: number
+
+	if (/^\d+$/.test(value)) {
+		// The numeric form is a whole number of seconds. Matched with a regex rather than
+		// passed to Number(), which would also read '1e3' and '0x10' as a count of seconds.
+		wait = Number(value) * 1000
+	} else {
+		// Otherwise an HTTP date. `Date.parse` is far looser here than it looks — it reads
+		// '-5' as May 2001 and '120' as the year 120 — so it cannot be relied on to reject
+		// nonsense. What makes that safe is the check below, not a tighter pattern up here.
+		const when = Date.parse(value)
+		if (Number.isNaN(when)) {
+			return undefined
+		}
+		wait = when - Date.now()
+	}
+
+	// Only a wait in the future is usable. A header resolving to zero or to the past tells us
+	// nothing about how long to hold off, and reading it as "retry now" would be the single
+	// worst answer available: asking again immediately against a quota already exhausted.
+	// Falling back to the caller's own backoff is safer, and is what an absent header does.
+	return wait > 0 ? wait : undefined
 }
 
 /**
@@ -51,23 +94,36 @@ export class ZendeskRequestError extends Error {
  */
 const RETRYABLE_STATUSES = new Set([408, 429, 502, 503, 504])
 
-/**
- * Error names fetch uses when the request never produced a response. `AbortError` is what the
- * 30 second timeout below raises; `TimeoutError` is what `AbortSignal.timeout` would raise if
- * this ever moves to it.
- */
-const RETRYABLE_ERROR_NAMES = new Set(['AbortError', 'TimeoutError'])
+/** How long a single `request` waits for an answer when nothing narrower bounds it. */
+const DEFAULT_TIMEOUT_MS = 30_000
 
 /**
- * Socket-level failures, which arrive as a `code` rather than as a distinct error name.
+ * How long a whole `requestWithRetry` call gets — every attempt and every backoff together.
  *
- * `code` is a Node convention, so this branch fires under Vitest and would fire on Node, but
- * not on workerd, where a dropped connection comes back as a plain `Error` reading "Network
- * connection lost." with no code to match on. Those go unretried, which is what they did
- * before this file stopped matching message text as well — the old substring list looked for
- * `econnreset`, and workerd's wording contains nothing of the sort. See #29.
+ * Set to the same figure as one attempt, which keeps the worst case exactly where it already
+ * was: a caller never waits longer than it does today. Before #24 that was also the real
+ * worst case, because a timed-out request was never retried; #24 fixed the classifier and
+ * the arithmetic followed it to three attempts and two backoffs, about 93 seconds. That is
+ * longer than most clients will wait, so the likely outcome was the caller giving up first
+ * and the remaining attempts running for nobody.
+ *
+ * What this buys is that retries stop costing wall-clock time the caller can feel. The case
+ * they exist for still works: a 503 answered in 200ms gets all three attempts inside four
+ * seconds. What they no longer do is stack full-length timeouts — a genuinely hung endpoint
+ * spends the budget on its first attempt and fails at 30 seconds, which is what it did
+ * before retrying timeouts was possible at all.
  */
-const RETRYABLE_ERROR_CODES = new Set(['ECONNRESET', 'ETIMEDOUT', 'ECONNREFUSED'])
+const TOTAL_TIMEOUT_MS = 30_000
+
+/**
+ * The smallest window worth starting an attempt in.
+ *
+ * Without it, "does another attempt fit" is answered after the fact: the loop sleeps through
+ * its backoff, starts a request with 40 milliseconds left, and that request is aborted on
+ * arrival. A second is a low bar, and clearing it is not a promise the attempt will finish —
+ * only that it was not doomed before it was sent.
+ */
+const MINIMUM_ATTEMPT_MS = 1_000
 
 /**
  * Yields an error and then each `cause` beneath it. `request` rewraps whatever it caught, so
@@ -82,6 +138,19 @@ function* causeChain(error: unknown, maxDepth = 10): Generator<Error> {
 		yield current
 		current = current.cause
 	}
+}
+
+/**
+ * The wait Zendesk asked for, if any link in the chain carries one. Walks it for the same
+ * reason the classifier does: `request` rewraps, so the answer sits a link or two down.
+ */
+function retryAfterFrom(error: unknown): number | undefined {
+	for (const link of causeChain(error)) {
+		if (link instanceof ZendeskRequestError && link.retryAfterMs !== undefined) {
+			return link.retryAfterMs
+		}
+	}
+	return undefined
 }
 
 /**
@@ -198,111 +267,174 @@ export class ZendeskClient {
 		method: string,
 		endpoint: string,
 		data?: unknown,
-		params?: Record<string, unknown>
+		params?: Record<string, unknown>,
+		timeoutMs = DEFAULT_TIMEOUT_MS
 	): Promise<unknown> {
+		// Above the try on purpose. Everything inside it is rewrapped as a ZendeskRequestError,
+		// and one of those carrying no status is how the retry policy recognises a request that
+		// never got an answer — which is worth sending again. A missing credential is not that.
+		// It will be just as missing on the third attempt, so leaving this inside would buy
+		// three seconds of backoff and the identical failure.
+		if (!this.subdomain || !this.email || !this.apiToken) {
+			throw new Error('Zendesk credentials not configured. Please set environment variables.')
+		}
+
+		// Preparing the request happens outside the try, and where the try starts is the whole
+		// point rather than a detail of layout. What it does is rewrap whatever it catches as a
+		// ZendeskRequestError, and one of those carrying no status is how the retry policy
+		// recognises a request that went out and got nothing back. None of the work below is
+		// that, and some of it can throw: `btoa` rejects any credential containing a character
+		// outside Latin-1, which is what a token pasted with a smart quote looks like, and
+		// JSON.stringify rejects a body it cannot serialize. Both fail identically on the third
+		// attempt. Leaving here as plain Errors is what tells the classifier no request was
+		// ever made — the same reason the credentials check above sits where it does.
+		const sanitizedEndpoint = this.sanitizeEndpoint(endpoint)
+
+		const url = new URL(`${this.getBaseUrl()}${sanitizedEndpoint}`)
+
+		// Add query parameters if provided
+		if (params) {
+			Object.entries(params).forEach(([key, value]) => {
+				if (value !== undefined && value !== null) {
+					url.searchParams.append(key, String(value))
+				}
+			})
+		}
+
+		const headers: Record<string, string> = {
+			Authorization: this.getAuthHeader(),
+			'Content-Type': 'application/json',
+			Accept: 'application/json',
+		}
+
+		// Only include body for non-GET requests
+		const body =
+			method !== 'GET' && data !== null && data !== undefined ? JSON.stringify(data) : undefined
+
+		// Create AbortController for timeout (compatible with all Workers versions).
+		// `timeoutMs` is whatever the caller has left rather than a fresh 30 seconds, so a
+		// retried attempt cannot extend the total past the deadline that governs the call.
+		// Armed last, after everything above that can throw, so a failure while preparing the
+		// request cannot leave a live timer behind holding the isolate awake.
+		const abortController = new AbortController()
+		const timeoutId = setTimeout(() => abortController.abort(), timeoutMs)
+
+		const requestInit: RequestInit = {
+			method,
+			headers,
+			// Redirects are not followed, because following one across origins silently
+			// loses the credential above. `strip_authorization_on_cross_origin_redirect`
+			// has been the platform default since 2025-09-01 and the compatibility date
+			// now sits past it, so the follow-up request goes out unauthenticated and
+			// Zendesk answers 401 — indistinguishable from a revoked API token, with
+			// nothing in the message pointing at a redirect. Confirmed against workerd
+			// rather than inferred: a hop to another host arrives with no Authorization
+			// header at all. Failing here instead says where the request was being sent.
+			redirect: 'manual',
+			signal: abortController.signal,
+		}
+		if (body !== undefined) {
+			requestInit.body = body
+		}
+
 		try {
-			// Validate credentials before making requests
-			if (!this.subdomain || !this.email || !this.apiToken) {
-				throw new Error('Zendesk credentials not configured. Please set environment variables.')
+			const response = await fetch(url.toString(), requestInit)
+
+			// A 3xx reaches this branch rather than being followed. It has to be caught
+			// before the check below, which would otherwise report it as a bare status
+			// with an empty body and say nothing about where the request was headed.
+			if (response.status >= 300 && response.status < 400) {
+				throw new ZendeskRequestError(
+					`Zendesk API Error: ${response.status} - ${describeRedirect(response, url)}`,
+					response.status
+				)
 			}
 
-			// Sanitize endpoint to prevent path traversal attacks
-			const sanitizedEndpoint = this.sanitizeEndpoint(endpoint)
-
-			const url = new URL(`${this.getBaseUrl()}${sanitizedEndpoint}`)
-
-			// Add query parameters if provided
-			if (params) {
-				Object.entries(params).forEach(([key, value]) => {
-					if (value !== undefined && value !== null) {
-						url.searchParams.append(key, String(value))
-					}
-				})
-			}
-
-			const headers: Record<string, string> = {
-				Authorization: this.getAuthHeader(),
-				'Content-Type': 'application/json',
-				Accept: 'application/json',
-			}
-
-			// Create AbortController for timeout (compatible with all Workers versions)
-			const abortController = new AbortController()
-			const timeoutId = setTimeout(() => abortController.abort(), 30000)
-
-			const requestInit: RequestInit = {
-				method,
-				headers,
-				// Redirects are not followed, because following one across origins silently
-				// loses the credential above. `strip_authorization_on_cross_origin_redirect`
-				// has been the platform default since 2025-09-01 and the compatibility date
-				// now sits past it, so the follow-up request goes out unauthenticated and
-				// Zendesk answers 401 — indistinguishable from a revoked API token, with
-				// nothing in the message pointing at a redirect. Confirmed against workerd
-				// rather than inferred: a hop to another host arrives with no Authorization
-				// header at all. Failing here instead says where the request was being sent.
-				redirect: 'manual',
-				signal: abortController.signal,
-			}
-
-			// Only include body for non-GET requests
-			if (method !== 'GET' && data !== null && data !== undefined) {
-				requestInit.body = JSON.stringify(data)
-			}
-
-			try {
-				const response = await fetch(url.toString(), requestInit)
-				clearTimeout(timeoutId)
-
-				// A 3xx reaches this branch rather than being followed. It has to be caught
-				// before the check below, which would otherwise report it as a bare status
-				// with an empty body and say nothing about where the request was headed.
-				if (response.status >= 300 && response.status < 400) {
-					throw new ZendeskRequestError(
-						`Zendesk API Error: ${response.status} - ${describeRedirect(response, url)}`,
-						response.status
-					)
+			if (!response.ok) {
+				// Reading the body is allowed to fail without taking the status down with it.
+				// A body arrives as a stream, so `text()` can reject after the headers are in
+				// hand — and letting that propagate would hand the outer catch a plain Error,
+				// which it rewraps carrying no status. The classifier reads a statusless error
+				// as a request that never got an answer, so a flatly refused 400 would be sent
+				// twice more on the strength of a body we could not read. The status is the
+				// part that decides, and it is already known here.
+				let errorText: string
+				try {
+					errorText = await response.text()
+				} catch {
+					errorText = '<the body could not be read>'
 				}
 
-				if (!response.ok) {
-					const errorText = await response.text()
-					throw new ZendeskRequestError(
-						`Zendesk API Error: ${response.status} - ${errorText}`,
-						response.status
-					)
-				}
+				throw new ZendeskRequestError(
+					`Zendesk API Error: ${response.status} - ${errorText}`,
+					response.status,
+					parseRetryAfter(response.headers.get('retry-after'))
+				)
+			}
 
-				// Handle empty responses (e.g., from DELETE requests)
-				const contentType = response.headers.get('content-type')
-				if (contentType && contentType.includes('application/json')) {
+			// Handle empty responses (e.g., from DELETE requests)
+			const contentType = response.headers.get('content-type')
+			if (contentType && contentType.includes('application/json')) {
+				try {
 					return await response.json()
-				} else {
-					return { success: true }
+				} catch (cause) {
+					// Carrying the status matters more than it looks. Zendesk answered, so
+					// this is not a request that failed to complete — and without a status
+					// the retry policy would read it as exactly that and ask again, re-sending
+					// something that already arrived on the strength of a body we could not
+					// parse. 200 is not in the retryable set, so it fails once and says why.
+					throw new ZendeskRequestError(
+						`Zendesk answered ${response.status} with a body that is not valid JSON`,
+						response.status,
+						undefined,
+						{ cause }
+					)
 				}
-			} finally {
-				clearTimeout(timeoutId)
+			} else {
+				return { success: true }
 			}
 		} catch (error) {
 			// Re-throw with more context, preserving original error chain for debugging.
-			// The status is carried onto the new error rather than left behind in the message,
-			// so a caller holding what request threw can read it without walking `cause`.
+			// What the response told us is carried onto the new error rather than left behind
+			// in the message, so a caller holding what request threw can read it without
+			// walking `cause`.
 			if (error instanceof Error) {
+				const answered = error instanceof ZendeskRequestError ? error : undefined
 				throw new ZendeskRequestError(
 					`Zendesk request failed: ${error.message}`,
-					error instanceof ZendeskRequestError ? error.status : undefined,
+					answered?.status,
+					answered?.retryAfterMs,
 					{ cause: error }
 				)
 			}
 			throw error
+		} finally {
+			// One place rather than two. The timer used to be cleared on the line after `await
+			// fetch` as well, which covered every path that got an answer but not the one where
+			// fetch rejects outright — the path requestWithRetry walks up to three times a call.
+			clearTimeout(timeoutId)
 		}
 	}
 
 	/**
 	 * Check if an error is retryable (transient failure)
 	 *
-	 * Classification reads the status and the error's identity, never the message text. The
+	 * Classification reads the status and nothing else, and never the message text. The
 	 * message is built out of the Zendesk response body, so matching on it cannot tell a 502
 	 * that happened from a 502 the body merely quotes.
+	 *
+	 * The rule asks two questions in order: did this come from `request` at all, and if so did
+	 * Zendesk answer it. A ZendeskRequestError means a request was actually sent, and a status
+	 * on it means an answer came back. No status therefore means the request went out and
+	 * nothing returned, which is worth sending again whatever the underlying cause was.
+	 *
+	 * Written that way because the previous version matched specifics that do not exist on the
+	 * runtime this deploys to. It looked for a `code` of ECONNRESET and friends, which is a
+	 * Node convention — true of undici under Vitest, false of workerd. Probed against the real
+	 * runtime before this was changed: an unreachable port gives a plain `Error` reading
+	 * "Network connection lost." with no `code` at all, and a host that will not resolve gives
+	 * "internal error; reference = <opaque id>". There is no name, code or wording worth keying
+	 * on, and asking whether a response arrived makes the rule independent of all three.
 	 */
 	private isRetryableError(error: unknown): boolean {
 		if (!(error instanceof Error)) {
@@ -310,29 +442,32 @@ export class ZendeskClient {
 		}
 
 		for (const link of causeChain(error)) {
-			// A status means Zendesk answered. Retry only the ones that mean "ask again";
-			// anything else it refused will be refused just as firmly on a second attempt.
-			if (link instanceof ZendeskRequestError && link.status !== undefined) {
-				return RETRYABLE_STATUSES.has(link.status)
-			}
-
-			// No status yet: this link may still be a timeout, or a connection that failed
-			// underneath fetch and was reported as the cause of a bare "fetch failed".
-			if (RETRYABLE_ERROR_NAMES.has(link.name)) {
-				return true
-			}
-			const { code } = link as { code?: unknown }
-			if (typeof code === 'string' && RETRYABLE_ERROR_CODES.has(code)) {
+			if (link instanceof ZendeskRequestError) {
+				// A status means Zendesk answered. Retry only the ones that mean "ask again";
+				// anything else it refused will be refused just as firmly on a second attempt.
+				if (link.status !== undefined) {
+					return RETRYABLE_STATUSES.has(link.status)
+				}
 				return true
 			}
 		}
 
+		// Nothing in the chain came from `request`, so no request was ever made. A missing
+		// credential or a malformed id fails here, and will fail identically next time.
 		return false
 	}
 
 	/**
 	 * Request with automatic retry for transient failures
 	 * Uses exponential backoff for retry delays
+	 *
+	 * One deadline governs the call. Attempts fit inside it rather than each starting a fresh
+	 * timeout, because what a caller cares about is how long until it hears back, not how long
+	 * any individual attempt was allowed to run.
+	 *
+	 * `maxRetries` stays, but it is no longer the interesting bound. It caps the loop when
+	 * failures arrive instantly and the deadline would otherwise permit a great many of them;
+	 * the deadline is what decides in every case where an attempt takes real time.
 	 */
 	async requestWithRetry(
 		method: string,
@@ -341,11 +476,12 @@ export class ZendeskClient {
 		params?: Record<string, unknown>,
 		maxRetries = 3
 	): Promise<unknown> {
+		const deadline = Date.now() + TOTAL_TIMEOUT_MS
 		let lastError: Error | undefined
 
 		for (let attempt = 0; attempt < maxRetries; attempt++) {
 			try {
-				return await this.request(method, endpoint, data, params)
+				return await this.request(method, endpoint, data, params, deadline - Date.now())
 			} catch (error) {
 				lastError = error as Error
 
@@ -355,7 +491,34 @@ export class ZendeskClient {
 				}
 
 				// Calculate exponential backoff delay: 1s, 2s, 4s (capped at 5s)
-				const delay = Math.min(1000 * Math.pow(2, attempt), 5000)
+				const backoff = Math.min(1000 * Math.pow(2, attempt), 5000)
+
+				// A rate limit says how long to wait, and asking again sooner is worse than not
+				// asking at all: the early retry spends more of a quota already exhausted, and
+				// providers commonly extend the penalty for a caller that keeps knocking. The
+				// ladder is the fallback for the responses that say nothing.
+				const requested = retryAfterFrom(error)
+				const delay = requested ?? backoff
+
+				// Decide whether the next attempt fits before sleeping, rather than sleeping and
+				// then discovering it does not. Waiting out a backoff only to send a request the
+				// deadline aborts on arrival wastes the one thing the caller is short of.
+				//
+				// This is also the only cap on `Retry-After`, and the right one. Asked to wait
+				// 60 seconds inside a 30 second budget, the honest answer is to stop and say so,
+				// not to clamp the wait down to something Zendesk did not agree to.
+				if (Date.now() + delay + MINIMUM_ATTEMPT_MS > deadline) {
+					console.warn(
+						`Request failed (attempt ${attempt + 1}/${maxRetries}) and the ${TOTAL_TIMEOUT_MS}ms deadline leaves no room to wait ${delay}ms and retry`,
+						{
+							error: error instanceof Error ? error.message : String(error),
+							retryAfterMs: requested,
+							method,
+							endpoint,
+						}
+					)
+					throw error
+				}
 
 				console.warn(
 					`Request failed (attempt ${attempt + 1}/${maxRetries}), retrying in ${delay}ms...`,
