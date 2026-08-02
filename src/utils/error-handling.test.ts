@@ -76,13 +76,22 @@ describe('withErrorHandling', () => {
 		expect(response.isError).toBe(true)
 	})
 
-	// JSON.stringify(undefined) is undefined rather than a string, so this leaves `text`
-	// unset on a response typed as always having one. No tool returns undefined today —
-	// every write either hands back a record or words its own sentence — but nothing stops one.
-	it('leaves the text unset when the wrapped function resolves to undefined', async () => {
+	// `JSON.stringify(undefined)` is undefined rather than a string, so a handler that resolved
+	// to nothing used to leave `text` unset on a response whose type promises one. No tool does
+	// that today, which is why #60 was worth fixing while nothing depended on the old shape.
+	it('keeps the text a string when the wrapped function resolves to undefined', async () => {
 		const handler = withErrorHandling(async () => undefined)
 
-		expect(textOf(await handler())).toBeUndefined()
+		expect(textOf(await handler())).toBe('')
+	})
+
+	// The same case with a confirmation to fall back on, which is the one a write would hit. The
+	// message is the whole answer here: interpolating the missing body would print the word
+	// "undefined" underneath it as though Zendesk had sent something back saying so.
+	it('says only the success message when there is no result to head', async () => {
+		const handler = withErrorHandling(async () => undefined, 'Ticket updated successfully!')
+
+		expect(textOf(await handler())).toBe('Ticket updated successfully!')
 	})
 
 	// What #28 was actually about. A handler that built its own response used to be wrapped a
