@@ -40,7 +40,7 @@ export const coverageThresholds = {
 	},
 	'src/utils/search-response.ts': {
 		statements: 100,
-		branches: 85,
+		branches: 95,
 		functions: 100,
 		lines: 100,
 	},
@@ -53,7 +53,7 @@ export const coverageThresholds = {
 	// Raised from 85 with #54, which drives every method on the client rather than the handful
 	// a test had reached by name. Measured 92 at the time.
 	'src/zendesk-client.ts': { branches: 90 },
-	'src/tools/help-center.ts': { branches: 75 },
+	'src/tools/help-center.ts': { branches: 85 },
 	// From nothing at all, with the first tests this file has ever had — its three routes, the
 	// Google exchange and the consent URL it builds.
 	//

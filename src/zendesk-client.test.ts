@@ -308,9 +308,12 @@ describe('request', () => {
 	})
 
 	// `request` rewraps every failure, so the Zendesk error itself survives only as the cause.
-	// executeSearchWithStandardizedResponse reads that back out into metadata.errorCause, and
-	// asserting only on the message above would let the two halves drift apart unnoticed:
-	// dropping the cause would strip the real reason out of every failed search, silently.
+	// Two things downstream read it back out, and asserting only on the message above would let
+	// them drift apart from this unnoticed. `executeSearchWithStandardizedResponse` puts the
+	// cause in the structured record it logs for Workers observability, and `isRetryableError`
+	// walks the whole chain looking for the link that carries a status. Dropping the cause would
+	// strip the real reason out of every failed search and leave the retry policy classifying a
+	// refusal it can no longer see.
 	it('keeps the underlying error as the cause of the one it throws', async () => {
 		stubFetch(async () => failedResponse(404, '{"error":"RecordNotFound"}'))
 

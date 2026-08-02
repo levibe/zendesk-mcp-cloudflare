@@ -485,12 +485,15 @@ export class ZendeskClient {
 				// Exponential backoff — 1s, 2s, 4s, capped at 5s — spread across the lower half
 				// of each step so that callers who failed together do not come back together.
 				//
-				// The spread matters more than it did when five methods retried and none of
-				// them fanned out. `get_help_center_hierarchy` issues one read per category and
-				// then one per section through nested Promise.all, so a Zendesk 503 fails a
-				// hundred requests within a few milliseconds of each other. On a fixed ladder
-				// all hundred sleep exactly 1000ms and arrive back in one burst, which is the
-				// shape that turns a recovering backend into a still-failing one.
+				// The spread matters because every GET retries, so requests that failed together
+				// come back together. On a fixed ladder they all sleep exactly 1000ms and arrive
+				// in one burst, which is the shape that turns a recovering backend into a
+				// still-failing one.
+				//
+				// Do not size this against the fan-out of any one tool. `get_help_center_hierarchy`
+				// is the tempting one and it is bounded to five reads in flight, and to forty
+				// across a whole call, so it cannot be what this window is for. What matters is
+				// that separate callers hitting one struggling Zendesk all wake on the same tick.
 				//
 				// Half the step rather than the whole of it, so the spread cannot undo the
 				// backoff: the first retry lands somewhere in 500-1000ms, never at 20ms.

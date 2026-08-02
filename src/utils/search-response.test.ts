@@ -4,6 +4,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { MockInstance } from 'vitest'
 import { executeSearchWithStandardizedResponse, standardizeSearchResponse } from './search-response'
 import { ZendeskRequestError } from '../zendesk-client'
 
@@ -161,11 +162,22 @@ describe('standardizeSearchResponse', () => {
 	})
 })
 
+/**
+ * The failure tests below used to pin the opposite of what they now assert: the function
+ * caught everything and resolved with the error described in `metadata`, and three tests said
+ * so on purpose. That is the swallow #28 removed from the write side, reaching reads from the
+ * other direction — a failed search resolved, so `withErrorHandling` never set `isError`, and
+ * a 503 read to the model like a search that matched nothing. Inverting them is the pin doing
+ * its job. If any of these ever goes back to asserting on `metadata.error`, the swallow is
+ * back with it.
+ */
 describe('executeSearchWithStandardizedResponse', () => {
+	let consoleError: MockInstance<typeof console.error>
+
 	beforeEach(() => {
 		// The error path logs a structured record for Workers observability. Silenced so a
-		// passing run stays readable; the assertions below cover what it puts in the response.
-		vi.spyOn(console, 'error').mockImplementation(() => {})
+		// passing run stays readable, and held onto so the logging test can read it back.
+		consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
 	})
 
 	it('standardizes a body the operation resolved with', async () => {
@@ -178,36 +190,63 @@ describe('executeSearchWithStandardizedResponse', () => {
 		expect(response.count).toBe(1)
 	})
 
-	it('reports a thrown error as metadata rather than letting it propagate', async () => {
+	it('lets a thrown error propagate, cause and all', async () => {
 		const cause = new Error('Zendesk API Error: 503 - upstream unavailable')
-		const response = await executeSearchWithStandardizedResponse(async () => {
+		const failure = executeSearchWithStandardizedResponse(async () => {
 			throw new Error('Zendesk request failed: it broke', { cause })
 		})
 
-		expect(response.metadata.error).toBe('Zendesk request failed: it broke')
-		expect(response.metadata.errorType).toBe('Error')
-		expect(response.metadata.errorCause).toBe('Zendesk API Error: 503 - upstream unavailable')
+		await expect(failure).rejects.toThrow('Zendesk request failed: it broke')
+		await expect(failure).rejects.toHaveProperty('cause', cause)
 	})
 
-	// errorType comes from the error's constructor name, so what a real failing search reports
-	// is whatever the client threw — a ZendeskRequestError, not the bare Error the tests above
-	// hand-build. Pinned here so the suite documents the type clients actually receive.
-	it('names the client error type a real failure would arrive with', async () => {
-		const response = await executeSearchWithStandardizedResponse(async () => {
-			throw new ZendeskRequestError('Zendesk request failed: Zendesk API Error: 503 - down', 503)
+	// What comes back out has to be the error the client threw rather than a copy of its
+	// message. `status` is the only thing that tells an answered request from one that never
+	// completed, so rewrapping here would strip the classification every caller downstream
+	// depends on.
+	it('rethrows the client error itself, status and all', async () => {
+		const thrown = new ZendeskRequestError(
+			'Zendesk request failed: Zendesk API Error: 503 - down',
+			503
+		)
+		const failure = executeSearchWithStandardizedResponse(async () => {
+			throw thrown
 		})
 
-		expect(response.metadata.errorType).toBe('ZendeskRequestError')
+		await expect(failure).rejects.toBe(thrown)
+		await expect(failure).rejects.toHaveProperty('status', 503)
 	})
 
-	it('answers a failure with an empty, explicitly unpaginated response', async () => {
-		const response = await executeSearchWithStandardizedResponse(async () => {
-			throw new Error('it broke')
+	it('logs the failure for Workers observability on its way past', async () => {
+		const failure = executeSearchWithStandardizedResponse(async () => {
+			throw new Error('it broke', { cause: new Error('upstream unavailable') })
+		}, 'ticket')
+
+		await expect(failure).rejects.toThrow('it broke')
+		expect(consoleError).toHaveBeenCalledWith(
+			'Search operation failed',
+			expect.objectContaining({
+				error: expect.objectContaining({
+					message: 'it broke',
+					cause: expect.objectContaining({ message: 'upstream unavailable' }),
+				}),
+				defaultResultType: 'ticket',
+			})
+		)
+	})
+
+	// Nothing in this codebase throws a non-Error, but the log record narrows for one, so the
+	// branch is here to be exercised — and a value that is not an Error still has to reach the
+	// caller unchanged rather than being turned into one.
+	it('propagates a thrown value that is not an Error, and logs it as a string', async () => {
+		const failure = executeSearchWithStandardizedResponse(async () => {
+			throw 'a bare string'
 		})
 
-		expect(response.results).toEqual([])
-		expect(response.count).toBe(0)
-		expect(response.next_page).toBeNull()
-		expect(response.previous_page).toBeNull()
+		await expect(failure).rejects.toBe('a bare string')
+		expect(consoleError).toHaveBeenCalledWith(
+			'Search operation failed',
+			expect.objectContaining({ error: 'a bare string' })
+		)
 	})
 })
