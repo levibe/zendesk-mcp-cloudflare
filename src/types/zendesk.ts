@@ -34,12 +34,16 @@ export type InferParams<S extends z.ZodRawShape> = z.infer<z.ZodObject<S>>
  * Tools have differing parameter shapes but have to share one array, so the shape cannot
  * survive into this interface. `createTool` is what keeps the guarantee: it checks each
  * handler against its own schema before widening it to fit here.
+ *
+ * `successMessage` is how a write tool gets its worded confirmation without building a response
+ * of its own — see `withErrorHandling` for why that matters.
  */
 export interface ToolDefinition {
 	name: string
 	description: string
 	schema: z.ZodRawShape
 	handler: (client: ZendeskClient, params: Record<string, unknown>) => Promise<unknown>
+	successMessage?: string
 }
 
 // Common Pagination Parameters

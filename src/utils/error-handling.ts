@@ -8,6 +8,13 @@ import type { McpToolResponse } from '../types/zendesk'
 /**
  * Higher-order function that wraps API calls with consistent error handling
  * Returns properly formatted MCP responses
+ *
+ * `registerTools` is the only caller, and applies this to every handler exactly once. Do not
+ * call it from inside a handler as well: a response wrapped twice is JSON-encoded as the text
+ * of the outer one, and `isError` goes with it, so a failed call reports as a successful one.
+ * A write's worded confirmation reaches this as `successMessage` on the tool definition, which
+ * is where the deleted create, update and delete wrappers were each wording one from the wrong
+ * side of the seam.
  */
 export const withErrorHandling =
 	<T extends unknown[], R>(fn: (...args: T) => Promise<R>, successMessage?: string) =>
@@ -42,29 +49,3 @@ export const withErrorHandling =
 			}
 		}
 	}
-
-/**
- * Specialized error handler for delete operations
- * Returns success message instead of empty response
- */
-export const withDeleteHandling = (
-	fn: () => Promise<unknown>,
-	itemType: string,
-	itemId: string | number
-) =>
-	withErrorHandling(async () => {
-		await fn()
-		return `${itemType} ${itemId} deleted successfully!`
-	})
-
-/**
- * Error handler for creation operations with custom success message
- */
-export const withCreateHandling = <T>(fn: () => Promise<T>, itemType: string) =>
-	withErrorHandling(fn, `${itemType} created successfully!`)
-
-/**
- * Error handler for update operations with custom success message
- */
-export const withUpdateHandling = <T>(fn: () => Promise<T>, itemType: string) =>
-	withErrorHandling(fn, `${itemType} updated successfully!`)
