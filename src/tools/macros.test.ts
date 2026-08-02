@@ -140,6 +140,13 @@ describe('create_macro', () => {
 			created
 		)
 	})
+
+	// These two are the only writes a client can reach, so the confirmation they carry is the
+	// only one anybody sees. It travels on the definition because the handler above must not
+	// build the response that carries it — registration heads the macro with this instead.
+	it('carries the confirmation registration heads the macro with', () => {
+		expect(createMacro.successMessage).toBe('Macro created successfully!')
+	})
 })
 
 describe('update_macro', () => {
@@ -168,5 +175,9 @@ describe('update_macro', () => {
 			'update_macro needs at least one field to change'
 		)
 		expect(client.updateMacro).not.toHaveBeenCalled()
+	})
+
+	it('carries the confirmation registration heads the macro with', () => {
+		expect(updateMacro.successMessage).toBe('Macro updated successfully!')
 	})
 })

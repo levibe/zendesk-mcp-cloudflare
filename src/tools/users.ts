@@ -13,7 +13,6 @@ import {
 	emailSchema,
 } from '../types/zendesk'
 import { createTool } from '../utils/tool-registry'
-import { withCreateHandling } from '../utils/error-handling'
 import { executeSearchWithStandardizedResponse } from '../utils/search-response'
 
 // User management tools
@@ -62,8 +61,9 @@ export const usersTools: ToolDefinition[] = [
 				organization_id: params.organization_id,
 			}
 
-			return withCreateHandling(() => client.createUser(userData), 'User')()
-		}
+			return client.createUser(userData)
+		},
+		'User created successfully!'
 	),
 
 	createTool(

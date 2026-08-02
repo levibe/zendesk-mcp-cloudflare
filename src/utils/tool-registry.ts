@@ -68,10 +68,14 @@ export const registerTools = (
 		// accepts a bare `{ field: z.string() }` record and wraps it internally, but that
 		// overload is marked deprecated, so the wrapping happens here instead. Tool definitions
 		// are unaffected and still spread shared shapes like `paginationSchema` directly.
+		//
+		// This is the only place a handler's result becomes a response, which is why the worded
+		// confirmation has to arrive here as data. See `withErrorHandling` for what wrapping one
+		// a second time costs.
 		server.registerTool(
 			tool.name,
 			{ description: tool.description, inputSchema: z.object(tool.schema) },
-			withErrorHandling(tool.handler.bind(null, client))
+			withErrorHandling(tool.handler.bind(null, client), tool.successMessage)
 		)
 	})
 
@@ -123,15 +127,23 @@ export const announceWithheldTools = (toolCategories: Record<string, ToolDefinit
  * The cast is the one place the specific parameter type is given up, and it is safe precisely
  * here: the compiler has just checked `handler` against `schema` for this call, and the MCP
  * server validates incoming arguments against that same schema before the handler ever runs.
+ *
+ * `successMessage` heads the record a write hands back — `'Ticket created successfully!'` above
+ * the created ticket — and is applied on the success path only, so it cannot dress a failure up
+ * as a success. A handler wording its whole answer, as `delete_ticket` does with an empty body
+ * to report, returns the sentence as a string and leaves this unset: `withErrorHandling` passes
+ * a string through untouched and never consults the message.
  */
 export const createTool = <S extends ZodRawShape>(
 	name: string,
 	description: string,
 	schema: S,
-	handler: (client: ZendeskClient, params: InferParams<S>) => Promise<unknown>
+	handler: (client: ZendeskClient, params: InferParams<S>) => Promise<unknown>,
+	successMessage?: string
 ): ToolDefinition => ({
 	name,
 	description,
 	schema,
 	handler: handler as ToolDefinition['handler'],
+	successMessage,
 })

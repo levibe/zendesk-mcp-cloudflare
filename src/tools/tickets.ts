@@ -14,7 +14,6 @@ import {
 	tagsSchema,
 } from '../types/zendesk'
 import { createTool } from '../utils/tool-registry'
-import { withCreateHandling, withUpdateHandling, withDeleteHandling } from '../utils/error-handling'
 import { executeSearchWithStandardizedResponse } from '../utils/search-response'
 
 // Ticket management tools
@@ -69,8 +68,9 @@ export const ticketsTools: ToolDefinition[] = [
 				tags: params.tags,
 			}
 
-			return withCreateHandling(() => client.createTicket(ticketData), 'Ticket')()
-		}
+			return client.createTicket(ticketData)
+		},
+		'Ticket created successfully!'
 	),
 
 	createTool(
@@ -151,8 +151,9 @@ export const ticketsTools: ToolDefinition[] = [
 			if (params.type !== undefined) ticketData.type = params.type
 			if (params.tags !== undefined) ticketData.tags = params.tags
 
-			return withUpdateHandling(() => client.updateTicket(params.id, ticketData), 'Ticket')()
-		}
+			return client.updateTicket(params.id, ticketData)
+		},
+		'Ticket updated successfully!'
 	),
 
 	createTool(
@@ -161,8 +162,12 @@ export const ticketsTools: ToolDefinition[] = [
 		{
 			id: idSchema.describe('Ticket ID to delete'),
 		},
+		// The one write with nothing to report: a successful delete comes back empty, so there is
+		// no record for a `successMessage` to head. Wording the whole answer as a string is how a
+		// handler says something a heading cannot — this one names the id it deleted.
 		async (client, { id }) => {
-			return withDeleteHandling(() => client.deleteTicket(id), 'Ticket', id)()
+			await client.deleteTicket(id)
+			return `Ticket ${id} deleted successfully!`
 		}
 	),
 ]

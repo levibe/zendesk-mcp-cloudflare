@@ -233,7 +233,15 @@ Keep passing `createTool` a bare shape. The registry wraps it in `z.object` befo
 
 **Registration is where the publication policy is enforced.** `registerTools` withholds anything that is neither a read nor a named write, as described above. A tool registered directly against the server would skip that check and reach clients whatever it does.
 
-A write tool also has to keep its hands off the response. Handlers return the client's result and let the single `withErrorHandling` in `registerTools` shape it, the way every read tool does. Calling `withCreateHandling` or its siblings inside a handler builds a second, finished response that the outer wrapper then JSON-encodes — burying `isError` where no client can see it, so a rejected write reads as a successful call. Several withheld write tools still do this, which is #28.
+A write tool also has to keep its hands off the response. Handlers return the client's result and let the single `withErrorHandling` in `registerTools` shape it, the way every read tool does. A handler that builds a finished response of its own gets wrapped a second time, so the inner response is JSON-encoded as the text of the outer one — which buries `isError` where no client can see it, and a write Zendesk rejected reads back as a successful call. That is why `registerTools` is the only place that calls `withErrorHandling`, and why a `no-restricted-imports` rule in `eslint.config.mjs` stops a handler importing it — every write handler in the tree had eroded off this rule at once, because nothing about a double-wrapped response looks wrong until a write fails. The wrappers that used to do this per verb are gone.
+
+A worded confirmation travels as the fifth argument to `createTool` instead, so registration can apply it from inside that one wrapper:
+
+```typescript
+createTool('create_widget', 'Create a widget', schema, handler, 'Widget created successfully!')
+```
+
+It heads the record on the success path only, so carrying one cannot dress a failure up as a success. A handler with nothing to head returns its whole answer as a string, which `withErrorHandling` passes through untouched — `delete_ticket` is the one doing that, since a successful delete comes back empty and the sentence has to name the id.
 
 ## Development Notes
 
