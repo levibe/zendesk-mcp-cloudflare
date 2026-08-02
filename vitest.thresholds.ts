@@ -23,6 +23,12 @@
  *   are held down by a long tail of thin methods, so a floor there would move
  *   whenever a method was added rather than when a decision stopped being
  *   tested. Branches track the thing worth protecting.
+ * - The OAuth handler pins branches alone for a different reason: its coverage
+ *   is deliberately partial. The tests cover /callback, where a public endpoint
+ *   parses attacker-supplied input, and leave /authorize and the Google token
+ *   exchange untested. So its function and statement counts describe how much
+ *   of the file has tests at all, which is not a number worth gating on, while
+ *   its branch count tracks the guard that actually decides something.
  *
  * Every number is the measured value rounded down, with enough slack that
  * unrelated work does not trip it. They ratchet against erosion; they are not a
@@ -52,4 +58,7 @@ export const coverageThresholds = {
 	// a test had reached by name. Measured 92 at the time.
 	'src/zendesk-client.ts': { branches: 90 },
 	'src/tools/help-center.ts': { branches: 75 },
+	// From nothing at all, with the first tests this file has ever had. Measured 64, and every
+	// covered branch is in the /callback state guard.
+	'src/google-handler.ts': { branches: 60 },
 }

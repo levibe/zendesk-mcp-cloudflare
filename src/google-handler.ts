@@ -1,6 +1,7 @@
 import type { AuthRequest, OAuthHelpers } from '@cloudflare/workers-oauth-provider'
 import { type Context, Hono } from 'hono'
 import { fetchUpstreamAuthToken, getUpstreamAuthorizeUrl, type Props } from './utils'
+import { isRecord } from './utils/narrow'
 import {
 	clientIdAlreadyApproved,
 	parseRedirectApproval,
@@ -88,11 +89,66 @@ async function redirectToGoogle(
  * down to the client. It ends by redirecting the client back to _its_ callback URL
  */
 app.get('/callback', async (c) => {
-	// Get the oathReqInfo out of KV
-	const oauthReqInfo = JSON.parse(atob(c.req.query('state') as string)) as AuthRequest
-	if (!oauthReqInfo.clientId) {
+	// The `state` here is `btoa(JSON.stringify(oauthReqInfo))` — see redirectToGoogle above. It
+	// is neither signed nor encrypted, so it carries the authorization request across the Google
+	// round trip but does not do the job the OAuth `state` parameter exists to do: nothing binds
+	// it to the browser session that started the flow, no nonce and no cookie, so anyone can mint
+	// one that satisfies every check below. That is the shape of an authorization-code injection.
+	// An attacker starts a flow of their own, then hands the victim a callback URL that binds the
+	// attacker's Google identity to the victim's MCP client session.
+	//
+	// What that is worth today is nothing, and the reason is worth writing down rather than
+	// leaving to be re-derived. Every Zendesk request goes out under one shared service account
+	// read from `env`, and nothing reads the `Props` this callback puts on the token — the comment
+	// at the bottom of src/utils.ts says exactly that. The signed-in identity therefore grants no
+	// differential access at all, so an attacker who wins this reaches only what they already had.
+	//
+	// #20 is the event that changes the answer, because it makes identity decide which tools a
+	// caller may use. On the day that lands, binding someone else's session to your Google account
+	// stops being a curiosity and becomes a privilege escalation, and this state has to be bound to
+	// the session that minted it first. Read the paragraph above as a fact with an expiry date
+	// rather than as a reason this is fine.
+	//
+	// Everything below arrived through the user's browser and none of it can be assumed
+	// well-formed. `state` may be absent, `atob` throws on anything outside the base64 alphabet,
+	// and `JSON.parse` throws on anything that is not JSON — on a public, unauthenticated endpoint
+	// all three used to be a bare 500 that anyone could produce at will. Handled the way GET
+	// /authorize handles parseAuthRequest above, and for the same reason: the real cause goes to
+	// the log, and the unauthenticated caller gets one fixed message that does not tell it which
+	// step it managed to break.
+	const encodedState = c.req.query('state')
+	if (!encodedState) {
 		return c.text('Invalid state', 400)
 	}
+
+	let decodedState: unknown
+	try {
+		decodedState = JSON.parse(atob(encodedState))
+	} catch (error) {
+		console.warn(
+			'Callback state could not be decoded:',
+			error instanceof Error ? error.message : String(error)
+		)
+		return c.text('Invalid state', 400)
+	}
+
+	// Narrow before reading a property off it. `JSON.parse` returns whatever the JSON said, which
+	// includes `null` and bare scalars, so reading `.clientId` straight off the result would let
+	// a state of `btoa('null')` throw the same unhandled TypeError in through a different door.
+	// The clientId check is the one that was already here; it just needs something to stand on.
+	if (
+		!isRecord(decodedState) ||
+		typeof decodedState.clientId !== 'string' ||
+		!decodedState.clientId
+	) {
+		return c.text('Invalid state', 400)
+	}
+
+	// The step through `unknown` is required rather than lazy: `AuthRequest` is an interface, so
+	// it carries no implicit index signature and TypeScript will not convert the narrowed record
+	// to it directly. Only `clientId` is checked above, which is what the code below reads before
+	// handing the whole object to completeAuthorization — the provider validates the rest.
+	const oauthReqInfo = decodedState as unknown as AuthRequest
 
 	// Exchange the code for an access token
 	const code = c.req.query('code')
