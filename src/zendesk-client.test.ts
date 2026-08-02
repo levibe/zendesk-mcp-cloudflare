@@ -718,6 +718,82 @@ describe('requestWithRetry', () => {
 	})
 })
 
+/**
+ * The rule #54 settled: the HTTP verb decides whether a call is sent again, so a GET is
+ * attempted three times against a 503 and everything else is attempted once.
+ *
+ * Driven off the prototype rather than a list of method names kept here, because a list kept
+ * here is the same discipline that produced the split in the first place — five methods
+ * retried, fifty-odd did not, and nothing said which was intended. Walking the class means a
+ * read added without retrying fails on the day it is written rather than whenever someone
+ * next reads the client top to bottom.
+ */
+describe('which methods retry', () => {
+	/**
+	 * Everything on the prototype that does not reach Zendesk: the constructor, the two request
+	 * methods themselves, and the private helpers, which are ordinary prototype properties at
+	 * runtime whatever TypeScript calls them.
+	 *
+	 * A denylist on purpose, and the one place in this file where that is the right shape. An
+	 * allowlist would let a new method be forgotten silently, which is the failure being fixed;
+	 * this way a new API method is covered by default, and a new private helper announces itself
+	 * by failing here until it is named.
+	 */
+	const notAnApiCall = new Set([
+		'constructor',
+		'request',
+		'requestWithRetry',
+		'sanitizeSubdomain',
+		'sanitizeEndpoint',
+		'validateId',
+		'getBaseUrl',
+		'getAuthHeader',
+		'isRetryableError',
+	])
+
+	const apiMethods = Object.getOwnPropertyNames(ZendeskClient.prototype).filter(
+		(name) => !notAnApiCall.has(name)
+	)
+
+	/**
+	 * Two arguments of `1` satisfy every signature on the client, which is what lets one probe
+	 * drive all of them. An id reaches `validateId` and passes, a payload serializes, and a
+	 * params object of `1` yields no query parameters rather than throwing. Nothing here asserts
+	 * on what was sent beyond its verb, so plausible is all these need to be.
+	 */
+	const probeArguments = [1, 1]
+
+	const callable = (name: string) =>
+		(client as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>)[name]
+
+	/**
+	 * `it.each` over an empty array runs nothing and still reports the file green, so what the
+	 * walk found is asserted rather than assumed. Without this, a change in how the class is
+	 * built — methods moved to instance fields, or reached through a mixin — would retire the
+	 * whole block silently, which is the failure it exists to prevent happening one level up.
+	 */
+	it('found the methods to drive', () => {
+		expect(apiMethods).toContain('listTickets')
+		expect(apiMethods).toContain('createTicket')
+		expect(apiMethods.length).toBeGreaterThan(50)
+	})
+
+	it.each(apiMethods)('sends %s again only if it is a GET', async (name) => {
+		const fetchMock = stubFetch(async () => failedResponse(503, 'unavailable'))
+
+		const call = callable(name).apply(client, probeArguments)
+		const rejects = expect(call).rejects.toThrow('Zendesk API Error: 503')
+		await drainBackoff()
+		await rejects
+
+		// Read off what went out rather than off the method's name, so the assertion turns on
+		// the same fact the client does. A method whose arguments never reached fetch has
+		// already failed the line above, so there is a call to read here.
+		const expected = sent(fetchMock).method === 'GET' ? 3 : 1
+		expect(fetchMock).toHaveBeenCalledTimes(expected)
+	})
+})
+
 describe('Retry-After', () => {
 	const rateLimited = (retryAfter: string) =>
 		new Response('Number of allowed API requests per minute exceeded', {

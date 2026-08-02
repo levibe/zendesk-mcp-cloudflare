@@ -537,9 +537,44 @@ export class ZendeskClient {
 		throw lastError
 	}
 
+	/*
+	 * A single star on purpose. This governs every method below it rather than the first one,
+	 * and a `/**` block would be collected as JSDoc for `listTickets` however many section
+	 * headers sit in between — putting the whole class-wide policy in the hover for one list
+	 * method. The disabled blocks further down are single-starred for their own reasons and
+	 * happen to be the same shape.
+	 *
+	 * Which of the two methods above a client method calls is decided by its HTTP verb, and by
+	 * nothing else. Every GET goes through `requestWithRetry`; every POST, PUT and DELETE goes
+	 * straight to `request` and gets a single attempt.
+	 *
+	 * A GET changes nothing, so sending it again costs only time — and since #32 the time is
+	 * bounded anyway, because one deadline covers every attempt and every backoff together. That
+	 * makes retrying a read close to free, which is why it is what a read gets by default rather
+	 * than something an individual method opts into.
+	 *
+	 * A write is the case that has to be argued rather than assumed. Zendesk takes no idempotency
+	 * key on these endpoints, so a 503 on a create that had actually succeeded is indistinguishable
+	 * from one on a create that had not, and asking again makes the second ticket. Nothing here can
+	 * tell those apart, so nothing here retries a write.
+	 *
+	 * That last rule is blunter than the facts support, deliberately and for now. A 429 or a 408
+	 * means the request was refused before it was acted on, so a write could safely go out again
+	 * on either — but acting on that means `RETRYABLE_STATUSES` stops being one set and starts
+	 * depending on the verb, which is #58 rather than something to slip in alongside this.
+	 *
+	 * Worth knowing what this replaced, because the shape of the bug is easy to reintroduce one
+	 * method at a time. Five methods retried and the rest did not, and the five had no property
+	 * the others lacked: `getTicket` survived a 503 where `getMacro` gave up on it, though they
+	 * are the same verb against the same API. They read as the methods that had caused visible
+	 * trouble at some point and had retrying added to them individually. A rule that follows from
+	 * the verb is what stops that reassembling, and the test named for it is what holds it — it
+	 * drives every method on this class and asks the verb what should have happened.
+	 */
+
 	// === TICKETS API ===
 	async listTickets(params?: Record<string, unknown>) {
-		return this.request('GET', '/tickets.json', null, params)
+		return this.requestWithRetry('GET', '/tickets.json', null, params)
 	}
 
 	async getTicket(id: number) {
@@ -575,7 +610,7 @@ export class ZendeskClient {
 	}
 
 	async listUsers(params?: Record<string, unknown>) {
-		return this.request('GET', '/users.json', null, params)
+		return this.requestWithRetry('GET', '/users.json', null, params)
 	}
 
 	async getUser(id: number) {
@@ -599,12 +634,12 @@ export class ZendeskClient {
 
 	// === ORGANIZATIONS API ===
 	async listOrganizations(params?: Record<string, unknown>) {
-		return this.request('GET', '/organizations.json', null, params)
+		return this.requestWithRetry('GET', '/organizations.json', null, params)
 	}
 
 	async getOrganization(id: number) {
 		this.validateId(id)
-		return this.request('GET', `/organizations/${id}.json`)
+		return this.requestWithRetry('GET', `/organizations/${id}.json`)
 	}
 
 	async createOrganization(data: any) {
@@ -623,12 +658,12 @@ export class ZendeskClient {
 
 	// === GROUPS API ===
 	async listGroups(params?: Record<string, unknown>) {
-		return this.request('GET', '/groups.json', null, params)
+		return this.requestWithRetry('GET', '/groups.json', null, params)
 	}
 
 	async getGroup(id: number) {
 		this.validateId(id)
-		return this.request('GET', `/groups/${id}.json`)
+		return this.requestWithRetry('GET', `/groups/${id}.json`)
 	}
 
 	async createGroup(data: any) {
@@ -647,12 +682,12 @@ export class ZendeskClient {
 
 	// === MACROS API ===
 	async listMacros(params?: Record<string, unknown>) {
-		return this.request('GET', '/macros.json', null, params)
+		return this.requestWithRetry('GET', '/macros.json', null, params)
 	}
 
 	async getMacro(id: number) {
 		this.validateId(id)
-		return this.request('GET', `/macros/${id}.json`)
+		return this.requestWithRetry('GET', `/macros/${id}.json`)
 	}
 
 	/**
@@ -676,12 +711,12 @@ export class ZendeskClient {
 
 	// === VIEWS API ===
 	async listViews(params?: Record<string, unknown>) {
-		return this.request('GET', '/views.json', null, params)
+		return this.requestWithRetry('GET', '/views.json', null, params)
 	}
 
 	async getView(id: number) {
 		this.validateId(id)
-		return this.request('GET', `/views/${id}.json`)
+		return this.requestWithRetry('GET', `/views/${id}.json`)
 	}
 
 	async createView(data: any) {
@@ -700,12 +735,12 @@ export class ZendeskClient {
 
 	// === TRIGGERS API ===
 	async listTriggers(params?: Record<string, unknown>) {
-		return this.request('GET', '/triggers.json', null, params)
+		return this.requestWithRetry('GET', '/triggers.json', null, params)
 	}
 
 	async getTrigger(id: number) {
 		this.validateId(id)
-		return this.request('GET', `/triggers/${id}.json`)
+		return this.requestWithRetry('GET', `/triggers/${id}.json`)
 	}
 
 	async createTrigger(data: any) {
@@ -724,12 +759,12 @@ export class ZendeskClient {
 
 	// === AUTOMATIONS API ===
 	async listAutomations(params?: Record<string, unknown>) {
-		return this.request('GET', '/automations.json', null, params)
+		return this.requestWithRetry('GET', '/automations.json', null, params)
 	}
 
 	async getAutomation(id: number) {
 		this.validateId(id)
-		return this.request('GET', `/automations/${id}.json`)
+		return this.requestWithRetry('GET', `/automations/${id}.json`)
 	}
 
 	async createAutomation(data: any) {
@@ -753,12 +788,12 @@ export class ZendeskClient {
 
 	// === HELP CENTER API ===
 	async listArticles(params?: Record<string, unknown>) {
-		return this.request('GET', '/help_center/articles.json', null, params)
+		return this.requestWithRetry('GET', '/help_center/articles.json', null, params)
 	}
 
 	async getArticle(id: number) {
 		this.validateId(id)
-		return this.request('GET', `/help_center/articles/${id}.json`)
+		return this.requestWithRetry('GET', `/help_center/articles/${id}.json`)
 	}
 
 	async createArticle(data: any, sectionId: number) {
@@ -784,12 +819,12 @@ export class ZendeskClient {
 
 	// Categories
 	async listCategories(params?: Record<string, unknown>) {
-		return this.request('GET', '/help_center/categories.json', null, params)
+		return this.requestWithRetry('GET', '/help_center/categories.json', null, params)
 	}
 
 	async getCategory(id: number) {
 		this.validateId(id)
-		return this.request('GET', `/help_center/categories/${id}.json`)
+		return this.requestWithRetry('GET', `/help_center/categories/${id}.json`)
 	}
 
 	/* DISABLED FOR SECURITY - create_category method
@@ -812,12 +847,12 @@ export class ZendeskClient {
 
 	// Sections
 	async listSections(params?: Record<string, unknown>) {
-		return this.request('GET', '/help_center/sections.json', null, params)
+		return this.requestWithRetry('GET', '/help_center/sections.json', null, params)
 	}
 
 	async getSection(id: number) {
 		this.validateId(id)
-		return this.request('GET', `/help_center/sections/${id}.json`)
+		return this.requestWithRetry('GET', `/help_center/sections/${id}.json`)
 	}
 
 	/* DISABLED FOR SECURITY - create_section method
@@ -840,21 +875,31 @@ export class ZendeskClient {
 
 	async listSectionsByCategory(categoryId: number, params?: Record<string, unknown>) {
 		this.validateId(categoryId)
-		return this.request('GET', `/help_center/categories/${categoryId}/sections.json`, null, params)
+		return this.requestWithRetry(
+			'GET',
+			`/help_center/categories/${categoryId}/sections.json`,
+			null,
+			params
+		)
 	}
 
 	async listArticlesBySection(sectionId: number, params?: Record<string, unknown>) {
 		this.validateId(sectionId)
-		return this.request('GET', `/help_center/sections/${sectionId}/articles.json`, null, params)
+		return this.requestWithRetry(
+			'GET',
+			`/help_center/sections/${sectionId}/articles.json`,
+			null,
+			params
+		)
 	}
 
 	// === TALK API ===
 	async getTalkStats() {
-		return this.request('GET', '/channels/voice/stats.json')
+		return this.requestWithRetry('GET', '/channels/voice/stats.json')
 	}
 
 	// === CHAT API ===
 	async listChats(params?: Record<string, unknown>) {
-		return this.request('GET', '/chats.json', null, params)
+		return this.requestWithRetry('GET', '/chats.json', null, params)
 	}
 }
