@@ -32,6 +32,9 @@ const jsonResponse = (body: unknown) =>
 
 const failedResponse = (status: number, body: string) => new Response(body, { status })
 
+/** Three seconds, in the numeric form Zendesk actually sends. */
+const retryAfter = { 'retry-after': '3' }
+
 /**
  * A response whose status arrives but whose body does not. The headers are in hand and the
  * stream then errors, which is how a connection dropped mid-body reaches the client.
@@ -295,6 +298,39 @@ describe('request', () => {
 		await expect(failure).rejects.toThrow('Zendesk answered 200 with a body that is not valid JSON')
 		await expect(failure).rejects.toHaveProperty('status', 200)
 	})
+
+	// Every branch that raises once a response is in hand goes through one helper built from that
+	// response, so none of them can leave the status off — there is no argument to omit. The
+	// point of the table is that it holds for a branch nobody had this invariant in mind while
+	// writing, which is how all four of the instances in #56 got there.
+	//
+	// `Retry-After` comes along on all three, including the two whose status can never be
+	// retried. That is the uniformity being asserted rather than a claim it is useful: reading
+	// the header everywhere is what stops a site deciding it does not need one, which is exactly
+	// how the JSON-parse branch came to omit it.
+	it.each([
+		['a refusal', 429, () => new Response('rate limited', { status: 429, headers: retryAfter })],
+		['a redirect', 301, () => new Response(null, { status: 301, headers: retryAfter })],
+		[
+			'a body that will not parse',
+			200,
+			() =>
+				new Response('<html>', {
+					headers: { ...retryAfter, 'content-type': 'application/json' },
+				}),
+		],
+	])(
+		'carries the status and Retry-After of the response behind %s',
+		async (_label, status, response) => {
+			stubFetch(async () => response())
+
+			const failure = client.request('GET', '/tickets.json')
+
+			await expect(failure).rejects.toBeInstanceOf(ZendeskRequestError)
+			await expect(failure).rejects.toHaveProperty('status', status)
+			await expect(failure).rejects.toHaveProperty('retryAfterMs', 3_000)
+		}
+	)
 
 	it('leaves the status unset when the request never got an answer', async () => {
 		stubFetch(async () => {

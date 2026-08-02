@@ -77,6 +77,38 @@ function parseRetryAfter(header: string | null): number | undefined {
 }
 
 /**
+ * Builds the error for a failure that a response is already in hand for.
+ *
+ * The status is what the retry policy classifies on, and an error missing one means something
+ * specific to it: the request went out and nothing came back, so send it again. Every failure
+ * raised once a response has arrived therefore has to carry the status it arrived with, or a
+ * refusal Zendesk stated plainly gets retried on the strength of a body we could not read.
+ *
+ * That held before this existed, but only because three separate sites each remembered to pass
+ * the same two things. Four instances of forgetting turned up while #29, #31 and #32 were being
+ * written, every one found by accident rather than by looking, and the last of them survived
+ * three rounds of review aimed at this exact mistake. Taking the `Response` rather than the two
+ * values read off it is what makes the omission unavailable: there is no argument to leave out.
+ *
+ * `Retry-After` is read here for every caller, including the ones whose status can never be
+ * retried. Uniform is worth more than precise — the header is meaningless on a 3xx and on the
+ * 200 whose body would not parse, and reading it costs nothing, where letting each site decide
+ * is how one of them came to omit it for no reason it could state.
+ *
+ * The rewrap in the outer catch is deliberately not built through this. It describes whatever it
+ * caught rather than a response, and it has no `Response` to hand — carrying the status forward
+ * when there is one is exactly its job.
+ */
+function errorFromResponse(response: Response, message: string, cause?: unknown) {
+	return new ZendeskRequestError(
+		message,
+		response.status,
+		parseRetryAfter(response.headers.get('retry-after')),
+		cause !== undefined ? { cause } : undefined
+	)
+}
+
+/**
  * Statuses where Zendesk is asking to be called back rather than refusing the request.
  *
  * 408 is in because it means the request timed out on their side and is worth sending again.
@@ -343,9 +375,9 @@ export class ZendeskClient {
 			// before the check below, which would otherwise report it as a bare status
 			// with an empty body and say nothing about where the request was headed.
 			if (response.status >= 300 && response.status < 400) {
-				throw new ZendeskRequestError(
-					`Zendesk API Error: ${response.status} - ${describeRedirect(response, url)}`,
-					response.status
+				throw errorFromResponse(
+					response,
+					`Zendesk API Error: ${response.status} - ${describeRedirect(response, url)}`
 				)
 			}
 
@@ -364,11 +396,7 @@ export class ZendeskClient {
 					errorText = '<the body could not be read>'
 				}
 
-				throw new ZendeskRequestError(
-					`Zendesk API Error: ${response.status} - ${errorText}`,
-					response.status,
-					parseRetryAfter(response.headers.get('retry-after'))
-				)
+				throw errorFromResponse(response, `Zendesk API Error: ${response.status} - ${errorText}`)
 			}
 
 			// A success without a JSON content type has no body worth parsing. An empty DELETE
@@ -383,11 +411,10 @@ export class ZendeskClient {
 					// the retry policy would read it as exactly that and ask again, re-sending
 					// something that already arrived on the strength of a body we could not
 					// parse. 200 is not in the retryable set, so it fails once and says why.
-					throw new ZendeskRequestError(
+					throw errorFromResponse(
+						response,
 						`Zendesk answered ${response.status} with a body that is not valid JSON`,
-						response.status,
-						undefined,
-						{ cause }
+						cause
 					)
 				}
 			} else {
