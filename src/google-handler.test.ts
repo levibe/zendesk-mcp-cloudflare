@@ -218,7 +218,11 @@ describe('GET /callback', () => {
 		it.each([
 			['the client is not registered', new Error('Client not found')],
 			['the redirect URI is not one the client registered', new Error('Invalid redirect URI')],
-			['the state carried no scope to join', new TypeError('Cannot read properties of undefined')],
+			// Not a shape the provider actually rejects — `scope` is only joined on the
+			// implicit-grant branch, and every client here is responseType: 'code'. Kept as a
+			// bare TypeError because the catch has to hold for anything the provider throws, not
+			// only for the refusals it words itself.
+			['it throws a TypeError from somewhere inside', new TypeError('Cannot read properties')],
 		])('answers 400 rather than 500 when %s', async (_label, thrown) => {
 			completeAuthorization.mockRejectedValue(thrown)
 
@@ -485,6 +489,49 @@ describe('/authorize', () => {
 
 			expect(response.status).toBe(400)
 			await expect(response.text()).resolves.toBe('Invalid request')
+		})
+
+		// This route is the cheapest of the three to reach: no Google sign-in, no valid cookie,
+		// just a POST. parseRedirectApproval throws on a state that is absent, not a string, not
+		// base64 JSON, or carries no clientId, and every one of those was a bare 500 anyone could
+		// produce on demand.
+		//
+		// Asserting the body matters more here than anywhere else in this file, because the module
+		// is mocked: coverage counts every statement in the route as exercised whether or not the
+		// stub ever rejects, so a green number proves nothing about this path. These two tests are
+		// the only evidence the guard exists.
+		describe('an approval it cannot parse', () => {
+			beforeEach(() => {
+				vi.spyOn(console, 'warn').mockImplementation(() => {})
+			})
+
+			it.each([
+				['the form carried no state', new Error('Missing or invalid state in form data')],
+				['the state is not base64 JSON', new Error('Failed to parse approval form: bad input')],
+				['a non-Error is thrown', 'a bare string'],
+			])('answers 400 rather than 500 when %s', async (_label, thrown) => {
+				vi.mocked(parseRedirectApproval).mockRejectedValue(thrown)
+
+				const response = await approve()
+
+				expect(response.status).toBe(400)
+				await expect(response.text()).resolves.toBe('Invalid request')
+			})
+
+			it('logs the real reason without relaying it to the caller', async () => {
+				const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+				vi.mocked(parseRedirectApproval).mockRejectedValue(
+					new Error('Failed to parse approval form: not base64')
+				)
+
+				const response = await approve()
+
+				expect(warn).toHaveBeenCalledWith(
+					'parseRedirectApproval rejected the request:',
+					'Failed to parse approval form: not base64'
+				)
+				await expect(response.text()).resolves.not.toContain('base64')
+			})
 		})
 
 		// The headers parseRedirectApproval hands back are the approval cookie, which is the whole

@@ -51,7 +51,28 @@ app.get('/authorize', async (c) => {
 })
 
 app.post('/authorize', async (c) => {
-	const { state, headers } = await parseRedirectApproval(c.req.raw, c.env.COOKIE_ENCRYPTION_KEY)
+	// Guarded for the same reason as the two catches in /callback, and this is the one a caller
+	// reaches most cheaply of the three: no Google sign-in, no valid cookie, nothing. A form body
+	// whose `state` is absent, is not a string, is not base64 JSON, or decodes without a
+	// `clientId` makes `parseRedirectApproval` throw, and an unhandled throw is answered by Hono
+	// as a bare 500.
+	//
+	// Worth knowing when reading coverage on this file: it reports every statement here as
+	// covered, because the tests replace `parseRedirectApproval` with a stub that resolves. A
+	// green number is not evidence this route is guarded — the test that proves it is the one
+	// making that stub reject.
+	let approval: Awaited<ReturnType<typeof parseRedirectApproval>>
+	try {
+		approval = await parseRedirectApproval(c.req.raw, c.env.COOKIE_ENCRYPTION_KEY)
+	} catch (error) {
+		console.warn(
+			'parseRedirectApproval rejected the request:',
+			error instanceof Error ? error.message : String(error)
+		)
+		return c.text('Invalid request', 400)
+	}
+
+	const { state, headers } = approval
 	if (!state.oauthReqInfo) {
 		return c.text('Invalid request', 400)
 	}
@@ -148,11 +169,18 @@ app.get('/callback', async (c) => {
 	// it carries no implicit index signature and TypeScript will not convert the narrowed record
 	// to it directly.
 	//
-	// What is checked above is `clientId` and nothing else, and the rest of this object is
-	// forged input all the way to `completeAuthorization`. Two of its fields are read on the way
-	// there — `scope` below, and `redirectUri` inside the provider — so do not read the cast as
-	// a claim that the shape has been established. The provider is what validates the rest, and
-	// the call is wrapped for exactly that reason: it validates by throwing.
+	// What is checked above is `clientId` and nothing else, and the rest of this object is forged
+	// input all the way to `completeAuthorization`. Do not read the cast as a claim that the
+	// shape has been established — several of its fields are read on the way there, `scope` two
+	// lines below and `redirectUri`, `responseType`, `resource`, `state`, `codeChallenge` and
+	// `codeChallengeMethod` inside the provider.
+	//
+	// The last two are the ones worth knowing about, because they are the PKCE binding and the
+	// provider copies them onto the grant without checking. A forged state omitting
+	// `codeChallenge` therefore mints a grant with no PKCE on it. That is not exploitable on its
+	// own here — the redirect URI still has to be one the client registered, so the code goes
+	// back to the real client — but it is the sharpest illustration of how much of this object
+	// is load-bearing and how little of it anything has checked by this point.
 	const oauthReqInfo = decodedState as unknown as AuthRequest
 
 	// Exchange the code for an access token
@@ -210,16 +238,18 @@ app.get('/callback', async (c) => {
 	// Wrapped for the same reason the state decode above is, and it is the last place a forged
 	// state can still reach. This object is validated here and nowhere earlier: the provider
 	// throws when `redirectUri` is missing, when the client is not registered, and when the
-	// redirect URI is not one that client registered. Those checks are the ones that matter and
-	// they hold — there is no open redirect here — but the provider signals all of them by
-	// throwing, and nothing upstream catches it, so an unhandled throw is answered by Hono as a
-	// bare 500. `scope` is the same story from the other direction: it is read straight off the
-	// forged object below, and the provider joins it without checking, so a state omitting it
-	// raises a TypeError rather than a refusal.
+	// redirect URI is not one that client registered. Those three checks are the ones that
+	// matter and they hold — there is no open redirect here — but the provider signals all of
+	// them by throwing, and nothing upstream catches it, so an unhandled throw is answered by
+	// Hono as a bare 500. The barrier to producing one at will was a Google sign-in and nothing
+	// more. A fixed 400 is the honest answer to a state we accepted only as far as its clientId,
+	// and the real reason goes to the log where the caller cannot read it.
 	//
-	// So the barrier to producing a 500 at will was a Google sign-in and nothing more. A fixed
-	// 400 is the honest answer to a state we accepted only as far as its clientId, and the real
-	// reason goes to the log where the caller cannot read it.
+	// Do not add `scope` to the list of things the provider refuses. `options.scope.join(' ')`
+	// runs only on the implicit-grant branch, and every client here uses `responseType: 'code'`,
+	// where scope is written onto the grant unexamined and an absent one simply drops the key.
+	// An earlier draft of this comment claimed the opposite and was describing validation that
+	// does not happen on the path this server actually takes.
 	let redirectTo: string
 	try {
 		;({ redirectTo } = await c.env.OAUTH_PROVIDER.completeAuthorization({
