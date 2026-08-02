@@ -115,8 +115,28 @@ function errorFromResponse(response: Response, message: string, cause?: unknown)
  *
  * 500 is out, for the opposite reason: it is a fault that will fail the same way on a second
  * attempt. 502, 503 and 504 mean the request never reached a healthy backend at all.
+ *
+ * This set is what a read may retry. A write answers to the narrower one below.
  */
 const RETRYABLE_STATUSES = new Set([408, 429, 502, 503, 504])
+
+/**
+ * The subset a write may retry: the refusals that cannot have acted on the request.
+ *
+ * A rate limit is Zendesk declining to start the work, and a 408 is Zendesk giving up before
+ * the request had finished arriving. Neither can have created a ticket, so sending one again is
+ * exactly as safe as sending a `GET` again.
+ *
+ * The other three are excluded because they are ambiguous rather than because they are severe,
+ * which is the distinction worth keeping hold of. A 504 means a gateway stopped waiting for a
+ * backend that may well have gone on to finish the work. These endpoints take no idempotency
+ * key, so nothing here can tell that from a backend that never got it, and asking again makes
+ * the second ticket. The client cannot make an ambiguous retry safe; it can only decline it.
+ *
+ * Do not read this as a severity ranking and add 500 to the read set to match — 500 is out of
+ * both for a different reason, that it will fail the same way next time.
+ */
+const RETRYABLE_STATUSES_FOR_WRITES = new Set([408, 429])
 
 /** How long a single `request` waits for an answer when nothing narrower bounds it. */
 const DEFAULT_TIMEOUT_MS = 30_000
@@ -450,8 +470,18 @@ export class ZendeskClient {
 	 *
 	 * The rule asks two questions in order: did this come from `request` at all, and if so did
 	 * Zendesk answer it. A ZendeskRequestError means a request was actually sent, and a status
-	 * on it means an answer came back. No status therefore means the request went out and
-	 * nothing returned, which is worth sending again whatever the underlying cause was.
+	 * on it means an answer came back.
+	 *
+	 * What no status means depends on the verb, and this is the sharp edge of the whole rule. It
+	 * says the request went out and nothing came back — so for a read, where asking again costs
+	 * only time, it is worth sending again whatever the underlying cause was. For a write it is
+	 * the worst case there is rather than a mild one: not only might the work have happened, we
+	 * never learned whether it did. That is strictly less knowledge than a 504 carries, and a
+	 * 504 is already excluded below, so retrying this while refusing that would make no sense.
+	 *
+	 * Which is why `retryable` is chosen by the caller's verb and the statusless case is not
+	 * shared. Reads keep the behaviour they have always had; a write retries the two refusals
+	 * that cannot have acted, and nothing else.
 	 *
 	 * Written that way because the previous version matched specifics that do not exist on the
 	 * runtime this deploys to. It looked for a `code` of ECONNRESET and friends, which is a
@@ -461,19 +491,25 @@ export class ZendeskClient {
 	 * "internal error; reference = <opaque id>". There is no name, code or wording worth keying
 	 * on, and asking whether a response arrived makes the rule independent of all three.
 	 */
-	private isRetryableError(error: unknown): boolean {
+	private isRetryableError(error: unknown, method: string): boolean {
 		if (!(error instanceof Error)) {
 			return false
 		}
+
+		const isWrite = method !== 'GET'
 
 		for (const link of causeChain(error)) {
 			if (link instanceof ZendeskRequestError) {
 				// A status means Zendesk answered. Retry only the ones that mean "ask again";
 				// anything else it refused will be refused just as firmly on a second attempt.
 				if (link.status !== undefined) {
-					return RETRYABLE_STATUSES.has(link.status)
+					const retryable = isWrite ? RETRYABLE_STATUSES_FOR_WRITES : RETRYABLE_STATUSES
+					return retryable.has(link.status)
 				}
-				return true
+
+				// The request went out and nothing came back. A read asks again; a write cannot,
+				// because this is the case where whether the work happened is unknowable.
+				return !isWrite
 			}
 		}
 
@@ -505,7 +541,7 @@ export class ZendeskClient {
 			} catch (error) {
 				lastError = error as Error
 
-				if (attempt === MAX_ATTEMPTS - 1 || !this.isRetryableError(error)) {
+				if (attempt === MAX_ATTEMPTS - 1 || !this.isRetryableError(error, method)) {
 					throw error
 				}
 
@@ -581,19 +617,20 @@ export class ZendeskClient {
 	 * What every method below calls. Reads the verb and picks the retry policy from it, so that
 	 * an API method says what request it wants and never how many times to send it.
 	 *
-	 * Every GET is retried and nothing else is. A GET changes nothing, so sending it again
-	 * costs only time — and since #32 the time is bounded anyway, because one deadline covers
-	 * every attempt and every backoff together. That makes retrying a read close to free.
+	 * Everything goes through `requestWithRetry` now, and the verb decides what may be retried
+	 * rather than whether anything is. Routing a write down a separate path was how the old
+	 * blunter rule was expressed, and keeping it would have meant expressing the new one twice.
 	 *
-	 * A write is the case that has to be argued rather than assumed. Zendesk takes no
-	 * idempotency key on these endpoints, so a 503 on a create that had actually succeeded is
-	 * indistinguishable from one on a create that had not, and asking again makes the second
-	 * ticket. Nothing here can tell those apart, so nothing here retries a write.
+	 * A GET changes nothing, so sending it again costs only time — and since #32 the time is
+	 * bounded anyway, because one deadline covers every attempt and every backoff together.
+	 * That makes retrying a read close to free, and a read retries on everything in
+	 * `RETRYABLE_STATUSES`, plus on getting no answer at all.
 	 *
-	 * That rule is blunter than the facts support, deliberately and for now. A 429 or a 408
-	 * means the request was refused before it was acted on, so a write could safely go out
-	 * again on either — but acting on that means `RETRYABLE_STATUSES` stops being one set and
-	 * starts depending on the verb, which is #58.
+	 * A write is the case that has to be argued rather than assumed, and it retries only the
+	 * two refusals that cannot have acted on it — see `RETRYABLE_STATUSES_FOR_WRITES`, which
+	 * carries that argument. Everything else it does exactly once, including the case where no
+	 * answer came back, because Zendesk takes no idempotency key on these endpoints and a
+	 * second attempt at a create that had already succeeded makes the second ticket.
 	 *
 	 * The dispatch existing at all is the point, and is what #54 was really about. Before it,
 	 * each method chose between `request` and `requestWithRetry` for itself, and five had
@@ -610,9 +647,7 @@ export class ZendeskClient {
 		data?: unknown,
 		params?: Record<string, unknown>
 	): Promise<unknown> {
-		return method === 'GET'
-			? this.requestWithRetry(method, endpoint, data, params)
-			: this.request(method, endpoint, data, params)
+		return this.requestWithRetry(method, endpoint, data, params)
 	}
 
 	// === TICKETS API ===

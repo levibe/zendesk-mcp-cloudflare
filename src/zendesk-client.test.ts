@@ -829,8 +829,10 @@ describe('requestWithRetry', () => {
 })
 
 /**
- * The rule #54 settled: the HTTP verb decides whether a call is sent again, so a GET is
- * attempted three times against a 503 and everything else is attempted once.
+ * The rule #54 settled, as #58 narrowed it: the HTTP verb decides what may be sent again. The
+ * probe here is a 503, which is ambiguous — it may have been acted on — so it stays the status
+ * that separates the verbs cleanly, a GET attempted three times against it and everything else
+ * once. The refusals a write may now retry are covered in `the per-verb retry policy` below.
  *
  * `send` is what makes that true, so what this really asks of each method is whether it went
  * through `send` at all. Nothing stops one reaching `request` or `requestWithRetry` directly
@@ -914,7 +916,7 @@ describe('which methods retry', () => {
 		expect(apiMethods.length).toBeGreaterThan(50)
 	})
 
-	it.each(apiMethods)('sends %s again only if it is a GET', async (name) => {
+	it.each(apiMethods)('sends %s again against a 503 only if it is a GET', async (name) => {
 		const fetchMock = stubFetch(async () => failedResponse(503, 'unavailable'))
 
 		const call = callable(name).apply(client, probeArguments)
@@ -927,6 +929,79 @@ describe('which methods retry', () => {
 		// already failed the line above, so there is a call to read here.
 		const expected = sent(fetchMock).method === 'GET' ? 3 : 1
 		expect(fetchMock).toHaveBeenCalledTimes(expected)
+	})
+})
+
+/**
+ * #58: a write retries the refusals that cannot have acted on it, and nothing else.
+ *
+ * Driven through `createTicket` and `listTickets` rather than through `requestWithRetry` with a
+ * verb argument, because the thing worth pinning is what an API method actually gets — the
+ * dispatch in `send` and the classifier agreeing is the whole of the feature, and a test that
+ * called the retry loop directly would pass with `send` routing writes anywhere at all.
+ */
+describe('the per-verb retry policy', () => {
+	const attemptsAgainst = async (status: number, call: () => Promise<unknown>) => {
+		const fetchMock = stubFetch(async () => failedResponse(status, 'refused'))
+		const rejects = expect(call()).rejects.toThrow(`Zendesk API Error: ${status}`)
+		await drainBackoff()
+		await rejects
+		return fetchMock.mock.calls.length
+	}
+
+	const aWrite = () => client.createTicket({ subject: 'hi' })
+	const aRead = () => client.listTickets()
+
+	// The two that mean the request was refused before anything happened. A rate limit is
+	// Zendesk declining to start the work, and a 408 is Zendesk giving up before the request
+	// finished arriving. Neither can have made a ticket, so a write is as safe to resend as a
+	// read — and a rate limit is the failure a busy account actually meets.
+	it.each([408, 429])('sends a write again on a %i', async (status) => {
+		expect(await attemptsAgainst(status, aWrite)).toBe(3)
+	})
+
+	// The ambiguous ones. A 504 means a gateway stopped waiting for a backend that may have gone
+	// on to finish the work, and nothing here can tell that from one that never got it.
+	it.each([502, 503, 504])('sends a write once on a %i', async (status) => {
+		expect(await attemptsAgainst(status, aWrite)).toBe(1)
+	})
+
+	it.each([408, 429, 502, 503, 504])('sends a read again on a %i', async (status) => {
+		expect(await attemptsAgainst(status, aRead)).toBe(3)
+	})
+
+	// The sharp edge, and the reason this is not just a narrower set. No status means the
+	// request went out and nothing came back, so we never learned whether the work happened —
+	// strictly less than a 504 tells us, and a 504 is already refused above. A read asks again
+	// because asking costs only time; a write cannot, because this is the case that makes the
+	// second ticket.
+	describe('when no answer came back at all', () => {
+		const dropped = () =>
+			stubFetch(async () => {
+				throw new TypeError('fetch failed')
+			})
+
+		it('sends a write exactly once', async () => {
+			const fetchMock = dropped()
+
+			const rejects = expect(client.createTicket({ subject: 'hi' })).rejects.toThrow(
+				'Zendesk request failed'
+			)
+			await drainBackoff()
+			await rejects
+
+			expect(fetchMock).toHaveBeenCalledTimes(1)
+		})
+
+		it('still sends a read again', async () => {
+			const fetchMock = dropped()
+
+			const rejects = expect(client.listTickets()).rejects.toThrow('Zendesk request failed')
+			await drainBackoff()
+			await rejects
+
+			expect(fetchMock).toHaveBeenCalledTimes(3)
+		})
 	})
 })
 
