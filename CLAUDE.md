@@ -110,6 +110,10 @@ Set these via `pnpm exec wrangler secret put <SECRET_NAME>`:
 
 Everything above is a secret, including `ZENDESK_SUBDOMAIN` and `ZENDESK_EMAIL`, which are not sensitive. Set new deployment config the same way rather than as a dashboard var, because a var does not survive: Workers Builds deploys the production branch with `wrangler deploy`, which honours `keep_vars`, but builds every other branch with `wrangler versions upload`, which takes no equivalent and clears plain vars while leaving encrypted ones alone. So a var lasts until the next pull request, and then fails as missing credentials at request time, pointing nowhere near the deploy that removed it.
 
+Builds for non-production branches are switched off in the Workers Builds settings, which stops that at the source. That decision lives in a dashboard rather than in this repo, so it is recorded here — otherwise the only trace of it is an absence, and turning it back on looks free. Keep the secrets rule above whether or not those builds are on: it is what makes re-enabling them safe, and it is the half of this that a pull request can actually protect.
+
+They were worth switching off for a second reason too. Every branch push uploaded a version newer than the deployed one, and `wrangler secret put` refuses to run in that state — editing a secret derives a new version from the latest, so applying one would have deployed an unreviewed branch as a side effect of changing a credential. Cloudflare is right to refuse, but it means an unmerged pull request could block a production credential change until `main` was deployed again.
+
 #### Local Development Setup
 
 Create `.dev.vars` file:
