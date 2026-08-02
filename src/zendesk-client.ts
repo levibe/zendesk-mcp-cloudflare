@@ -498,10 +498,9 @@ export class ZendeskClient {
 				// in one burst, which is the shape that turns a recovering backend into a
 				// still-failing one.
 				//
-				// Do not size this against `get_help_center_hierarchy`, which is what the comment
-				// here used to do. That walk fanned out through nested Promise.all and could put a
-				// hundred reads in flight; it is bounded to five now, and to forty across a whole
-				// call. The number that matters is not how many requests one tool makes — it is
+				// Do not size this against the fan-out of any one tool. `get_help_center_hierarchy`
+				// is the tempting one and it is bounded to five reads in flight, and to forty
+				// across a whole call, so it cannot be what this window is for. What matters is
 				// that separate callers hitting one struggling Zendesk all wake on the same tick.
 				//
 				// Half the step rather than the whole of it, so the spread cannot undo the

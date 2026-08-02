@@ -210,16 +210,15 @@ const mapWithLimit = async <T, R>(items: T[], task: (item: T) => Promise<R>): Pr
  * What the response says when it is handing back part of the Help Center rather than all of it.
  *
  * Worded around the fact rather than the cause, because the note cannot tell which cause fired
- * without the budget carrying a reason it does not carry. Naming only the two limits was wrong
- * once already: an unreadable page truncates after a single request, and a note claiming the
- * walk had reached a forty-request ceiling would be describing something that plainly had not
- * happened.
+ * without the budget carrying a reason it does not carry. It has to stay true of all of them:
+ * an unreadable page truncates after a single request, so a note naming only the two limits
+ * would tell that caller it had reached a forty-request ceiling it never came near.
  *
  * The third clause covers two shapes rather than one, and keeping them together is deliberate.
  * A body with no list in it and a marker that cannot be followed are different failures — the
  * first is a response the walk could not find its list in at all, the second a list it read and
- * then lost its place in — but they are one fact to a caller, and an earlier wording naming
- * only the marker told a model its cursor was bad when the body had simply not been JSON.
+ * then lost its place in — but they are one fact to a caller. Naming only the marker would tell
+ * a model its cursor was bad when the body had simply not been JSON.
  *
  * The remedy has to be conditional. Asking for a smaller slice answers the two limits and does
  * nothing for a page that could not be read: a narrower walk reads the same page and stops in
