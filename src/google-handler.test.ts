@@ -202,6 +202,63 @@ describe('GET /callback', () => {
 		})
 	})
 
+	// completeAuthorization is the last place a forged state can still reach, and it is the only
+	// thing that validates the rest of it — the clientId check up front is the whole of what
+	// happens before here. It validates by throwing: an unregistered client, a missing
+	// redirectUri, or a redirect URI the client never registered each raise, and a state with no
+	// scope raises a TypeError when the provider joins it. Those checks are the ones that matter
+	// and they hold, so there is no open redirect. What was wrong is that nothing caught them, so
+	// the answer was a bare 500 that anyone could produce at will once they had signed in with
+	// Google — which is the property the state guard at the top of this route exists to remove.
+	describe('a state the provider rejects', () => {
+		beforeEach(() => {
+			vi.spyOn(console, 'warn').mockImplementation(() => {})
+		})
+
+		it.each([
+			['the client is not registered', new Error('Client not found')],
+			['the redirect URI is not one the client registered', new Error('Invalid redirect URI')],
+			['the state carried no scope to join', new TypeError('Cannot read properties of undefined')],
+		])('answers 400 rather than 500 when %s', async (_label, thrown) => {
+			completeAuthorization.mockRejectedValue(thrown)
+
+			const response = await callback({ state: validState, code: 'google-code' })
+
+			expect(response.status).toBe(400)
+			await expect(response.text()).resolves.toBe('Invalid authorization request')
+		})
+
+		// Same split as the two catches above it: the caller is unauthenticated, so the provider's
+		// own wording goes to the log and the response stays a fixed string.
+		it('logs the provider reason without relaying it to the caller', async () => {
+			const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+			completeAuthorization.mockRejectedValue(new Error('Client not found: no-such-client'))
+
+			const response = await callback({ state: validState, code: 'google-code' })
+
+			expect(warn).toHaveBeenCalledWith(
+				'completeAuthorization rejected the request:',
+				'Client not found: no-such-client'
+			)
+			await expect(response.text()).resolves.not.toContain('no-such-client')
+		})
+
+		// The String(error) arm of the ternary. Reachable here, unlike the decode catch above,
+		// because what throws is a stub rather than atob or JSON.parse.
+		it('logs a thrown non-Error as a string', async () => {
+			const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+			completeAuthorization.mockRejectedValue('a bare string')
+
+			const response = await callback({ state: validState, code: 'google-code' })
+
+			expect(warn).toHaveBeenCalledWith(
+				'completeAuthorization rejected the request:',
+				'a bare string'
+			)
+			expect(response.status).toBe(400)
+		})
+	})
+
 	describe('HOSTED_DOMAIN', () => {
 		it('refuses a sign-in from outside the hosted domain', async () => {
 			userinfoResponse = () =>

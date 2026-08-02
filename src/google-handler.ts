@@ -146,8 +146,13 @@ app.get('/callback', async (c) => {
 
 	// The step through `unknown` is required rather than lazy: `AuthRequest` is an interface, so
 	// it carries no implicit index signature and TypeScript will not convert the narrowed record
-	// to it directly. Only `clientId` is checked above, which is what the code below reads before
-	// handing the whole object to completeAuthorization — the provider validates the rest.
+	// to it directly.
+	//
+	// What is checked above is `clientId` and nothing else, and the rest of this object is
+	// forged input all the way to `completeAuthorization`. Two of its fields are read on the way
+	// there — `scope` below, and `redirectUri` inside the provider — so do not read the cast as
+	// a claim that the shape has been established. The provider is what validates the rest, and
+	// the call is wrapped for exactly that reason: it validates by throwing.
 	const oauthReqInfo = decodedState as unknown as AuthRequest
 
 	// Exchange the code for an access token
@@ -200,20 +205,43 @@ app.get('/callback', async (c) => {
 		return c.text(`Access restricted to ${c.env.HOSTED_DOMAIN} domain users only`, 403)
 	}
 
-	// Return back to the MCP client a new token
-	const { redirectTo } = await c.env.OAUTH_PROVIDER.completeAuthorization({
-		metadata: {
-			label: name,
-		},
-		props: {
-			accessToken,
-			email,
-			name,
-		} as Props,
-		request: oauthReqInfo,
-		scope: oauthReqInfo.scope,
-		userId: id,
-	})
+	// Return back to the MCP client a new token.
+	//
+	// Wrapped for the same reason the state decode above is, and it is the last place a forged
+	// state can still reach. This object is validated here and nowhere earlier: the provider
+	// throws when `redirectUri` is missing, when the client is not registered, and when the
+	// redirect URI is not one that client registered. Those checks are the ones that matter and
+	// they hold — there is no open redirect here — but the provider signals all of them by
+	// throwing, and nothing upstream catches it, so an unhandled throw is answered by Hono as a
+	// bare 500. `scope` is the same story from the other direction: it is read straight off the
+	// forged object below, and the provider joins it without checking, so a state omitting it
+	// raises a TypeError rather than a refusal.
+	//
+	// So the barrier to producing a 500 at will was a Google sign-in and nothing more. A fixed
+	// 400 is the honest answer to a state we accepted only as far as its clientId, and the real
+	// reason goes to the log where the caller cannot read it.
+	let redirectTo: string
+	try {
+		;({ redirectTo } = await c.env.OAUTH_PROVIDER.completeAuthorization({
+			metadata: {
+				label: name,
+			},
+			props: {
+				accessToken,
+				email,
+				name,
+			} as Props,
+			request: oauthReqInfo,
+			scope: oauthReqInfo.scope,
+			userId: id,
+		}))
+	} catch (error) {
+		console.warn(
+			'completeAuthorization rejected the request:',
+			error instanceof Error ? error.message : String(error)
+		)
+		return c.text('Invalid authorization request', 400)
+	}
 
 	return Response.redirect(redirectTo)
 })
