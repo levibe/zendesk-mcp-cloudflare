@@ -38,11 +38,26 @@ announceWithheldTools(toolCategories)
  * configuration read from `env` and opens no connection of its own.
  */
 const createServer = (env: Env) => {
-	const server = new McpServer({
-		name: 'Zendesk API Server',
-		version: '1.0.0',
-		description: 'Remote MCP Server for interacting with the Zendesk API',
-	})
+	const server = new McpServer(
+		{
+			name: 'Zendesk API Server',
+			version: '1.0.0',
+			description: 'Remote MCP Server for interacting with the Zendesk API',
+		},
+		// Five minutes, rather than the `ttlMs: 0` the SDK fills in for a server it knows nothing
+		// about. This list earns a cache because it does not vary: `toolCategories` is a fixed
+		// literal, both allowlists are compile-time constants, and registration never consults the
+		// authenticated user, so every caller gets the same bytes until there is a deploy.
+		//
+		// Five rather than sixty because this TTL is the only staleness bound there is — nothing
+		// here can tell a client the list has changed, for the reasons CLAUDE.md sets out. So the
+		// number is really an answer to "how long may a client go on offering a tool we removed",
+		// and it should be read that way before anyone raises it.
+		//
+		// `private` keeps the whole of the benefit, which is a client not re-fetching its own
+		// list. `public` would add only sharing through an intermediary, and there is none here.
+		{ cacheHints: { 'tools/list': { ttlMs: 300_000, cacheScope: 'private' } } }
+	)
 
 	registerAllTools(server, new ZendeskClient(undefined, env), toolCategories)
 
