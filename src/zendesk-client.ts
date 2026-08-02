@@ -349,6 +349,18 @@ export class ZendeskClient {
 	}
 
 	// === USERS API ===
+
+	/**
+	 * The user the configured credentials authenticate as. `support_info` is built on this
+	 * because it is the smallest call that exercises the subdomain, the email and the token
+	 * together — any of the three being wrong or missing fails here rather than being reported
+	 * as healthy. It also answers the question that gets asked when something is misconfigured,
+	 * which is not whether a request works but which identity the server is using.
+	 */
+	async getCurrentUser() {
+		return this.requestWithRetry('GET', '/users/me.json')
+	}
+
 	async listUsers(params?: Record<string, unknown>) {
 		return this.request('GET', '/users.json', null, params)
 	}
