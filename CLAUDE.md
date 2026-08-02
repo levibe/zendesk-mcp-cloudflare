@@ -45,6 +45,22 @@ A stale list is a staleness problem rather than a security one, which is the rea
 
 `cacheScope` is `private` deliberately. The body is identical for every caller, which is the test `public` actually applies, but `public` would add only sharing through an intermediary and there is none here — the connector fetches server-side and `mcp-remote` runs per user. Per-deployment configuration would keep that true, since a deployment is one URL with one list; a per-user permission model would not, which is the thing to re-check if #20 lands.
 
+### A cookie is what binds the OAuth state, and a signature would not
+
+`redirectToGoogle` mints a random nonce, puts it in the `state` Google hands back and sets it as a `HttpOnly; Secure; SameSite=Lax` cookie, and `/callback` refuses anything where the two disagree. That is what stops an authorization-code injection: an attacker starts a flow of their own and hands the victim the resulting callback URL, and without this the victim's client session ends up bound to the attacker's Google identity.
+
+The trap is thinking an HMAC would do instead, and it is worth knowing before someone reaches for `signData` — it is right there in `src/workers-oauth-utils.ts`, so the shortcut is available. Signing proves the state is one we minted, and the attacker's state **is** one we minted, obtained by starting a flow themselves. It stops tampering and stops none of the attack. What an attacker cannot do is set a cookie on somebody else's browser, so the cookie is the control and a signature would only be an earlier way to notice a different problem.
+
+Three details each fail in a way that looks like something else:
+
+- `SameSite=Lax` is required rather than chosen. The return from Google is a cross-site top-level navigation, which `Lax` permits and `Strict` drops — so `Strict` would refuse every sign-in rather than only the forged ones.
+- The `Set-Cookie` has to go on a `Headers` and be `append`ed. `POST /authorize` already carries the approval cookie, and a second `Set-Cookie` key on a plain object literal replaces it rather than accompanying it, so the approval is silently discarded and nothing about the redirect looks wrong.
+- A missing cookie is fatal, and that is the deliberate cost. Blocked cookies, a mid-flow browser switch or half an hour on the consent screen all become a refused login. The alternative is a check that is decorative, since the attack's ordinary shape is a browser presenting no cookie at all.
+
+`/callback` cannot restart the flow to soften that, which is the thing to re-derive before adding it. Restarting means calling `redirectToGoogle` directly, and `GET /authorize` only reaches that after the approval gate — so a restart skips consent, and the victim signs in against whatever `clientId` and `redirectUri` the attacker's state carried. That inverts the attack rather than fixing it.
+
+This still matters more later than now: every Zendesk request goes out under one shared service account, so a signed-in identity grants no differential access. #20 is what changes that.
+
 ### Key Files
 
 - `src/index.ts` - Main entry point integrating OAuth and Zendesk functionality

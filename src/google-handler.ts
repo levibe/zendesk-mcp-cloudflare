@@ -1,5 +1,6 @@
 import type { AuthRequest, OAuthHelpers } from '@cloudflare/workers-oauth-provider'
 import { type Context, Hono } from 'hono'
+import { getCookie } from 'hono/cookie'
 import { fetchUpstreamAuthToken, getUpstreamAuthorizeUrl, type Props } from './utils'
 import { isRecord } from './utils/narrow'
 import {
@@ -21,6 +22,29 @@ import {
  */
 const reasonFor = (error: unknown): string =>
 	error instanceof Error ? error.message : String(error)
+
+/**
+ * The cookie holding the nonce that binds a callback to the browser that started the flow.
+ *
+ * `SameSite=Lax` rather than `Strict`, and that is required rather than a preference: the return
+ * from Google is a top-level GET navigation from another site, which `Lax` permits and `Strict`
+ * would drop — making every sign-in fail rather than only the forged ones.
+ */
+const STATE_NONCE_COOKIE = 'mcp-auth-nonce'
+
+/**
+ * How long the browser has to finish at Google, in seconds.
+ *
+ * This is the time a user may sit on the consent screen before their sign-in is refused, so it
+ * is a usability number as much as a security one. Thirty minutes survives a genuine
+ * interruption. The window is the weaker of the two controls in any case: the nonce is random
+ * per flow and cleared the moment it is used, so what this bounds is only how long an abandoned
+ * flow stays replayable by the browser that abandoned it.
+ */
+const STATE_NONCE_MAX_AGE_SECONDS = 1_800
+
+const nonceCookie = (value: string, maxAgeSeconds: number) =>
+	`${STATE_NONCE_COOKIE}=${value}; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=${maxAgeSeconds}`
 
 const app = new Hono<{ Bindings: Env & { OAUTH_PROVIDER: OAuthHelpers } }>()
 
@@ -115,26 +139,47 @@ async function redirectToGoogle(
 	// read back in /callback, and `renderApprovalDialog` and `parseRedirectApproval` are a second
 	// pair in the vendored file — so the two halves have to move together or a state minted
 	// before the change stops decoding after it. That is worth doing on its own, not in passing.
+	// The nonce is what makes the state belong to this browser. It goes into the state Google
+	// hands back and into a cookie only this browser holds, and `/callback` requires the two to
+	// agree — so a state minted somewhere else no longer completes a flow here.
+	//
+	// It has to be the cookie doing this rather than a signature. An HMAC would prove the state
+	// is one we minted, and an attacker can obtain a genuinely minted state simply by starting a
+	// flow of their own, so signing detects tampering and stops none of the attack. What the
+	// attacker cannot do is set a cookie on someone else's browser.
+	const nonce = crypto.randomUUID()
+
 	let state: string
 	try {
-		state = btoa(JSON.stringify(oauthReqInfo))
+		state = btoa(JSON.stringify({ ...oauthReqInfo, nonce }))
 	} catch (error) {
 		console.warn('The authorization request could not be encoded as state:', reasonFor(error))
 		return c.text('Invalid request', 400)
 	}
 
+	// A `Headers` rather than an object literal, and the reason is a real trap. `headers` may
+	// already carry the approval cookie from POST /authorize, and a second `Set-Cookie` key on a
+	// plain object would replace it rather than accompany it — silently signing the user out of
+	// their approval to fix a CSRF hole. `append` is what allows two of them.
+	// Note this stays a `Headers` all the way into the Response. Flattening it back through
+	// `Object.fromEntries` would undo the whole point, because object keys are unique and the
+	// two cookies would collapse to one again.
+	const responseHeaders = new Headers(headers)
+	responseHeaders.append('Set-Cookie', nonceCookie(nonce, STATE_NONCE_MAX_AGE_SECONDS))
+	responseHeaders.set(
+		'location',
+		getUpstreamAuthorizeUrl({
+			clientId: c.env.GOOGLE_CLIENT_ID,
+			hostedDomain: c.env.HOSTED_DOMAIN,
+			redirectUri: new URL('/callback', c.req.raw.url).href,
+			scope: 'email profile',
+			state,
+			upstreamUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
+		})
+	)
+
 	return new Response(null, {
-		headers: {
-			...headers,
-			location: getUpstreamAuthorizeUrl({
-				clientId: c.env.GOOGLE_CLIENT_ID,
-				hostedDomain: c.env.HOSTED_DOMAIN,
-				redirectUri: new URL('/callback', c.req.raw.url).href,
-				scope: 'email profile',
-				state,
-				upstreamUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
-			}),
-		},
+		headers: responseHeaders,
 		status: 302,
 	})
 }
@@ -145,25 +190,20 @@ async function redirectToGoogle(
  * and is what a tool can later read through `getMcpAuthContext()` — see `Props` in ../utils.
  */
 app.get('/callback', async (c) => {
-	// The `state` here is `btoa(JSON.stringify(oauthReqInfo))` — see redirectToGoogle above. It
-	// is neither signed nor encrypted, so it carries the authorization request across the Google
-	// round trip but does not do the job the OAuth `state` parameter exists to do: nothing binds
-	// it to the browser session that started the flow, no nonce and no cookie, so anyone can mint
-	// one that satisfies every check below. That is the shape of an authorization-code injection.
-	// An attacker starts a flow of their own, then hands the victim a callback URL that binds the
-	// attacker's Google identity to the victim's MCP client session.
+	// The `state` here is what redirectToGoogle minted: the authorization request plus a nonce,
+	// base64 of JSON and still neither signed nor encrypted. It does not need to be. What the
+	// OAuth `state` parameter exists to do is bind the callback to the browser that started the
+	// flow, and the nonce check below does that against a cookie only that browser holds.
 	//
-	// What that is worth today is nothing, and the reason is worth writing down rather than
-	// leaving to be re-derived. Every Zendesk request goes out under one shared service account
-	// read from `env`, and nothing reads the `Props` this callback puts on the token — the comment
-	// at the bottom of src/utils.ts says exactly that. The signed-in identity therefore grants no
-	// differential access at all, so an attacker who wins this reaches only what they already had.
+	// Without it this was the shape of an authorization-code injection: an attacker starts a flow
+	// of their own, then hands the victim a callback URL that binds the attacker's Google identity
+	// to the victim's MCP client session. #65 has the argument and the test that used to record
+	// the hole is now inverted to record the fix.
 	//
-	// #20 is the event that changes the answer, because it makes identity decide which tools a
-	// caller may use. On the day that lands, binding someone else's session to your Google account
-	// stops being a curiosity and becomes a privilege escalation, and this state has to be bound to
-	// the session that minted it first. Read the paragraph above as a fact with an expiry date
-	// rather than as a reason this is fine.
+	// Encrypting the state would still buy nothing, and it is worth saying so because the state
+	// being readable looks like the problem and is not. It carries the client's own authorization
+	// request, which that client already knows; the security property is that a state cannot be
+	// used from a browser other than the one it was minted for.
 	//
 	// Everything below arrived through the user's browser and none of it can be assumed
 	// well-formed. `state` may be absent, `atob` throws on anything outside the base64 alphabet,
@@ -196,6 +236,32 @@ app.get('/callback', async (c) => {
 	) {
 		return c.text('Invalid state', 400)
 	}
+
+	// The nonce check, and the one thing here that makes a forged state fail. Everything above
+	// establishes that the state is well-formed; this establishes that it belongs to the browser
+	// presenting it, which is the property an authorization-code injection has to break.
+	//
+	// Both halves are required. A state with no nonce is one minted before this existed, or one
+	// an attacker wrote by hand — treated the same, because neither can show the cookie. A
+	// cookie with no state to match is the same failure from the other side.
+	//
+	// A plain comparison rather than a constant-time one. What is compared is a random v4 UUID
+	// that lives for one flow, so there is no secret to recover a byte at a time, and the
+	// attacker cannot replay what they learn against another browser anyway.
+	const presentedNonce = getCookie(c, STATE_NONCE_COOKIE)
+	if (
+		typeof decodedState.nonce !== 'string' ||
+		!presentedNonce ||
+		presentedNonce !== decodedState.nonce
+	) {
+		console.warn('Callback state did not match the nonce cookie for this browser')
+		return c.text('Invalid state', 400)
+	}
+
+	// The nonce comes back off before the request goes any further. `completeAuthorization`
+	// writes this object onto the grant, and the nonce has done its job by now — keeping it
+	// would persist a spent credential into KV for no reason.
+	delete decodedState.nonce
 
 	// The step through `unknown` is required rather than lazy: `AuthRequest` is an interface, so
 	// it carries no implicit index signature and TypeScript will not convert the narrowed record
@@ -311,7 +377,17 @@ app.get('/callback', async (c) => {
 		return c.text('Invalid authorization request', 400)
 	}
 
-	return Response.redirect(redirectTo)
+	// The nonce is spent, so it is cleared here rather than left to expire. Without this it stays
+	// valid in this browser for the rest of its `Max-Age`, and the state that matches it is
+	// sitting in that browser's history — so a back-button replay would complete the flow a
+	// second time. `Response.redirect` gives an immutable response, hence building it by hand.
+	return new Response(null, {
+		headers: {
+			location: redirectTo,
+			'Set-Cookie': nonceCookie('', 0),
+		},
+		status: 302,
+	})
 })
 
 export { app as GoogleHandler }

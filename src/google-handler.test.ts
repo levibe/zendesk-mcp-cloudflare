@@ -37,8 +37,18 @@ const authRequest: AuthRequest = {
 	state: 'client-state',
 }
 
-/** The state exactly as redirectToGoogle mints it. */
-const validState = btoa(JSON.stringify(authRequest))
+/**
+ * The nonce binding a state to the browser that started the flow, and the cookie carrying it.
+ *
+ * A fixed value rather than a real UUID, because what the tests exercise is whether the two
+ * halves are compared, not how the nonce was generated. The one test that cares about the
+ * generation asserts the two agree rather than pinning a value.
+ */
+const NONCE = 'test-nonce-3f2a'
+const NONCE_COOKIE = `mcp-auth-nonce=${NONCE}`
+
+/** The state exactly as redirectToGoogle mints it, nonce included. */
+const validState = btoa(JSON.stringify({ ...authRequest, nonce: NONCE }))
 
 /** What lookupClient hands the approval dialog to name the client asking. */
 const clientInfo = {
@@ -69,8 +79,21 @@ const testEnv = (overrides: Record<string, unknown> = {}) =>
 		...overrides,
 	}) as unknown as Env & { OAUTH_PROVIDER: OAuthHelpers }
 
-const callback = (query: Record<string, string>, env = testEnv()) =>
-	GoogleHandler.request(`/callback?${new URLSearchParams(query).toString()}`, undefined, env)
+/**
+ * The cookie defaults to one matching `validState`, so a test that is not about the nonce does
+ * not have to say anything about it. Pass `null` to send no cookie at all, or another string to
+ * send one that does not match.
+ */
+const callback = (
+	query: Record<string, string>,
+	env = testEnv(),
+	cookie: string | null = NONCE_COOKIE
+) =>
+	GoogleHandler.request(
+		`/callback?${new URLSearchParams(query).toString()}`,
+		cookie === null ? undefined : { headers: { cookie } },
+		env
+	)
 
 /** /authorize reaches for two provider methods that /callback never touches. */
 const authorizeEnv = (overrides: Record<string, unknown> = {}) =>
@@ -378,19 +401,84 @@ describe('GET /callback', () => {
 		)
 	})
 
-	// The state is unsigned, so a hand-built one the server never minted completes the flow just
-	// as a genuine one does. This passing is the point: it records the CSRF property the comment
-	// on the handler describes, so that binding state to a session — which #20 forces — has to
-	// invert this test rather than quietly leave it passing. #65 tracks the binding itself; #20
-	// is only what raises its impact. See the comment on the handler for why that impact is
-	// bounded today.
-	it('accepts a state the server never issued', async () => {
+	// This is the test #65 inverted. It used to assert that a hand-built state completed the flow,
+	// passing deliberately to record the CSRF property until something fixed it. The nonce is
+	// that fix, so the assertion is now the opposite one.
+	//
+	// The attacker's problem is not the state, which they can write freely — it is the cookie,
+	// which they cannot set on someone else's browser. That is why a signature would not have
+	// been enough: an attacker can obtain a genuinely signed state by starting their own flow.
+	/**
+	 * The nonce is what binds a callback to the browser that began the flow, so these are the
+	 * tests that carry #65.
+	 *
+	 * Worth knowing what they cannot show, because it is a real limit rather than a gap to fill
+	 * in later. The whole suite drives the handler through `GoogleHandler.request` with a stubbed
+	 * `fetch`, so a cookie surviving a real redirect back from Google is not something any of
+	 * this demonstrates — these prove the two halves are compared and that the comparison
+	 * decides, and a genuine browser round trip stays outside what the suite can reach.
+	 */
+	describe('the nonce binding the state to this browser', () => {
+		it('refuses a state whose nonce does not match the cookie', async () => {
+			const response = await callback(
+				{ state: validState, code: 'google-code' },
+				testEnv(),
+				'mcp-auth-nonce=a-different-browser'
+			)
+
+			expect(response.status).toBe(400)
+			await expect(response.text()).resolves.toBe('Invalid state')
+			expect(completeAuthorization).not.toHaveBeenCalled()
+		})
+
+		// No cookie is the ordinary shape of the attack — the victim's browser never started this
+		// flow, so it has nothing to present. It is also what a user with cookies blocked looks
+		// like, which is the cost of the check being real rather than decorative.
+		it('refuses a state when the browser presents no cookie at all', async () => {
+			const response = await callback({ state: validState, code: 'google-code' }, testEnv(), null)
+
+			expect(response.status).toBe(400)
+			expect(completeAuthorization).not.toHaveBeenCalled()
+		})
+
+		// A state minted before this shipped has no nonce, and so cannot be told apart from one
+		// written by hand. Both are refused. A flow in flight across the deploy is the cost, and
+		// it is seconds to minutes wide.
+		it('refuses a state carrying no nonce at all', async () => {
+			const legacy = btoa(JSON.stringify(authRequest))
+
+			const response = await callback({ state: legacy, code: 'google-code' }, testEnv(), null)
+
+			expect(response.status).toBe(400)
+			expect(completeAuthorization).not.toHaveBeenCalled()
+		})
+
+		it('clears the cookie once the nonce has been spent', async () => {
+			const response = await callback({ state: validState, code: 'google-code' })
+
+			expect(response.status).toBe(302)
+			expect(response.headers.get('set-cookie')).toContain('Max-Age=0')
+		})
+
+		// The nonce has done its job by the time the request reaches the provider, and leaving it
+		// on would write a spent credential into KV with the grant.
+		it('does not pass the nonce on to the provider', async () => {
+			await callback({ state: validState, code: 'google-code' })
+
+			expect(completeAuthorization).toHaveBeenCalledWith(
+				expect.objectContaining({ request: expect.not.objectContaining({ nonce: NONCE }) })
+			)
+		})
+	})
+
+	it('refuses a state the server never issued', async () => {
 		const forged = btoa(JSON.stringify({ ...authRequest, clientId: 'someone-elses-client' }))
 
 		const response = await callback({ state: forged, code: 'google-code' })
 
-		expect(response.status).toBe(302)
-		expect(completeAuthorization).toHaveBeenCalledOnce()
+		expect(response.status).toBe(400)
+		await expect(response.text()).resolves.toBe('Invalid state')
+		expect(completeAuthorization).not.toHaveBeenCalled()
 	})
 })
 
@@ -585,13 +673,22 @@ describe('/authorize', () => {
 		// point of having approved: without it riding along on this redirect the next authorization
 		// asks again. Nothing about the redirect itself would look wrong if it were dropped, so the
 		// assertion on set-cookie is doing work the status and location cannot.
-		it('redirects to Google carrying the approval cookie the parse handed back', async () => {
+		//
+		// Two cookies now, and asserting on both is the point rather than thoroughness. This route
+		// is the only one that sets more than one, so it is the only place the nonce could have
+		// replaced the approval — which is exactly what an object literal keyed by header name
+		// would have done, silently, while every other assertion here went on passing.
+		it('redirects to Google carrying both the approval cookie and the nonce', async () => {
 			const response = await approve()
 
 			expect(parseRedirectApproval).toHaveBeenCalledWith(expect.any(Request), 'test-cookie-secret')
 			expect(response.status).toBe(302)
 			expect(googleUrl(response).hostname).toBe('accounts.google.com')
-			expect(response.headers.get('set-cookie')).toBe('mcp_approved_clients=signed; Path=/')
+
+			const cookies = response.headers.getSetCookie()
+			expect(cookies).toContain('mcp_approved_clients=signed; Path=/')
+			expect(cookies).toHaveLength(2)
+			expect(cookies.some((cookie) => cookie.startsWith('mcp-auth-nonce='))).toBe(true)
 		})
 	})
 
@@ -610,9 +707,34 @@ describe('/authorize', () => {
 			expect(url.searchParams.get('redirect_uri')).toBe(`${workerOrigin}/callback`)
 			expect(url.searchParams.get('scope')).toBe('email profile')
 			expect(url.searchParams.get('response_type')).toBe('code')
-			// The same unsigned base64 the /callback tests above decode, which is what makes the
-			// two halves of the flow one flow rather than two that happen to agree.
-			expect(url.searchParams.get('state')).toBe(validState)
+			// The state carries the authorization request the callback will read back, which is
+			// what makes the two halves of the flow one flow rather than two that happen to
+			// agree. It can no longer be compared to a fixed string, because the nonce in it is
+			// fresh per flow — so the request fields are checked, and the nonce separately below.
+			expect(JSON.parse(atob(url.searchParams.get('state')!))).toMatchObject(authRequest)
+		})
+
+		// The binding itself, asserted as the one fact that matters: the nonce Google is asked to
+		// hand back is the same one this browser was just given. Checking either alone would pass
+		// while the two were generated independently, which is the mistake that would leave every
+		// legitimate sign-in failing and every forged one failing for the wrong reason.
+		it('mints a nonce that matches the cookie it sets', async () => {
+			const response = await authorize()
+
+			const state = JSON.parse(atob(googleUrl(response).searchParams.get('state')!))
+			const cookie = response.headers
+				.getSetCookie()
+				.find((value) => value.startsWith('mcp-auth-nonce='))!
+
+			expect(typeof state.nonce).toBe('string')
+			expect(state.nonce).not.toHaveLength(0)
+			expect(cookie).toContain(`mcp-auth-nonce=${state.nonce};`)
+			expect(cookie).toContain('HttpOnly')
+			expect(cookie).toContain('Secure')
+			// Lax rather than Strict, because the return from Google is a cross-site top-level
+			// navigation. Strict would drop the cookie and refuse every sign-in.
+			expect(cookie).toContain('SameSite=Lax')
+			expect(cookie).toContain('Max-Age=1800')
 		})
 
 		// The callback is built from whichever host the request arrived on, which README documents
