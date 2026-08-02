@@ -84,6 +84,43 @@ function* causeChain(error: unknown, maxDepth = 10): Generator<Error> {
 	}
 }
 
+/**
+ * What to say about a redirect this client declined to follow.
+ *
+ * The two cases have different causes and different fixes, so they get different sentences.
+ * A hop to another host is what a renamed subdomain looks like, and it is the one the
+ * platform would have stripped the credential from. A redirect that stays on the same host
+ * would have been safe to follow, so saying that keeps an unexpected one from reading as
+ * the credential problem it is not.
+ *
+ * Re-attaching the credential and following on is deliberately not an option here. That
+ * would mean deciding the new host is trustworthy, which is the judgement the platform
+ * default exists to stop `fetch` making on its own.
+ */
+function describeRedirect(response: Response, requestUrl: URL): string {
+	const location = response.headers.get('location')
+	if (!location) {
+		return 'redirected without naming a destination, and redirects are not followed.'
+	}
+
+	let target: URL
+	try {
+		target = new URL(location, requestUrl)
+	} catch {
+		return `redirected to "${location}", which is not a URL. Redirects are not followed.`
+	}
+
+	if (target.host !== requestUrl.host) {
+		return (
+			`redirected to ${target.host}. Redirects are not followed, because the Authorization ` +
+			`header does not survive a hop to another host. If the Zendesk subdomain has moved, ` +
+			`update ZENDESK_SUBDOMAIN.`
+		)
+	}
+
+	return `redirected to ${target.pathname} on the same host, and redirects are not followed.`
+}
+
 export class ZendeskClient {
 	private subdomain: string
 	private email: string
@@ -183,12 +220,6 @@ export class ZendeskClient {
 				})
 			}
 
-			// `redirect` is left at its default of `follow`, and a redirect that crosses to
-			// another host is now followed without this header —
-			// `strip_authorization_on_cross_origin_redirect` has been the platform default
-			// since 2025-09-01, and the compatibility date finally sits past it. The second
-			// request goes out unauthenticated and comes back 401, which reads exactly like a
-			// revoked API token. A renamed subdomain is how that would happen here. See #39.
 			const headers: Record<string, string> = {
 				Authorization: this.getAuthHeader(),
 				'Content-Type': 'application/json',
@@ -202,6 +233,15 @@ export class ZendeskClient {
 			const requestInit: RequestInit = {
 				method,
 				headers,
+				// Redirects are not followed, because following one across origins silently
+				// loses the credential above. `strip_authorization_on_cross_origin_redirect`
+				// has been the platform default since 2025-09-01 and the compatibility date
+				// now sits past it, so the follow-up request goes out unauthenticated and
+				// Zendesk answers 401 — indistinguishable from a revoked API token, with
+				// nothing in the message pointing at a redirect. Confirmed against workerd
+				// rather than inferred: a hop to another host arrives with no Authorization
+				// header at all. Failing here instead says where the request was being sent.
+				redirect: 'manual',
 				signal: abortController.signal,
 			}
 
@@ -213,6 +253,16 @@ export class ZendeskClient {
 			try {
 				const response = await fetch(url.toString(), requestInit)
 				clearTimeout(timeoutId)
+
+				// A 3xx reaches this branch rather than being followed. It has to be caught
+				// before the check below, which would otherwise report it as a bare status
+				// with an empty body and say nothing about where the request was headed.
+				if (response.status >= 300 && response.status < 400) {
+					throw new ZendeskRequestError(
+						`Zendesk API Error: ${response.status} - ${describeRedirect(response, url)}`,
+						response.status
+					)
+				}
 
 				if (!response.ok) {
 					const errorText = await response.text()

@@ -22,6 +22,7 @@ interface SentRequest {
 	method: string
 	headers: Record<string, string>
 	body?: string
+	redirect?: string
 	signal: AbortSignal
 }
 
@@ -29,6 +30,9 @@ const jsonResponse = (body: unknown) =>
 	new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } })
 
 const failedResponse = (status: number, body: string) => new Response(body, { status })
+
+const redirectResponse = (status: number, location?: string) =>
+	new Response(null, { status, headers: location ? { location } : {} })
 
 /**
  * A Response body can only be read once, so `respond` is called per attempt rather than a
@@ -265,6 +269,69 @@ describe('request', () => {
 			'cause.message',
 			'Zendesk API Error: 404 - {"error":"RecordNotFound"}'
 		)
+	})
+})
+
+/**
+ * Confirmed against workerd before any of this was written, rather than read off the flag's
+ * documentation: under `follow`, a hop from 127.0.0.1 to localhost arrived carrying no
+ * Authorization header at all, and under `manual` the 301 came back intact with `Location`
+ * readable — not the opaque status-0 response a browser would hand back. The fix depends on
+ * both of those, so they were worth establishing rather than assuming.
+ */
+describe('a redirect', () => {
+	it('is not followed', async () => {
+		const fetchMock = stubFetch(async () => jsonResponse({ tickets: [] }))
+
+		await client.listTickets()
+
+		expect(sent(fetchMock).redirect).toBe('manual')
+	})
+
+	// The whole point of #39: this used to be a 401 carrying a Zendesk authentication-error
+	// body, which reads exactly like a revoked token and names nothing worth acting on.
+	it('to another host names that host and the secret to change', async () => {
+		stubFetch(async () => redirectResponse(301, 'https://renamed.zendesk.com/api/v2/tickets.json'))
+
+		await expect(client.request('GET', '/tickets.json')).rejects.toThrow(
+			/redirected to renamed\.zendesk\.com\..*does not survive a hop to another host.*update ZENDESK_SUBDOMAIN/s
+		)
+	})
+
+	// A same-origin redirect would have kept the credential, so it is a different problem
+	// with a different fix. Saying so keeps it from being read as the credential failure.
+	it('to the same host says so instead', async () => {
+		stubFetch(async () => redirectResponse(307, '/api/v2/tickets.json?page=2'))
+
+		await expect(client.request('GET', '/tickets.json')).rejects.toThrow(
+			'redirected to /api/v2/tickets.json on the same host'
+		)
+	})
+
+	it('with no destination still fails rather than reporting an empty body', async () => {
+		stubFetch(async () => redirectResponse(302))
+
+		await expect(client.request('GET', '/tickets.json')).rejects.toThrow(
+			'redirected without naming a destination'
+		)
+	})
+
+	it('carries the status it answered with', async () => {
+		stubFetch(async () => redirectResponse(301, 'https://renamed.zendesk.com/'))
+
+		await expect(client.request('GET', '/tickets.json')).rejects.toHaveProperty('status', 301)
+	})
+
+	// It carries a status, so it is classified as an answer Zendesk gave rather than as a
+	// request that never completed. 3xx is not in the retryable set, so it is asked once.
+	it('is not retried', async () => {
+		const fetchMock = stubFetch(async () =>
+			redirectResponse(301, 'https://renamed.zendesk.com/api/v2/tickets.json')
+		)
+
+		await expect(client.requestWithRetry('GET', '/tickets.json')).rejects.toThrow('redirected to')
+
+		expect(fetchMock).toHaveBeenCalledTimes(1)
 	})
 })
 
