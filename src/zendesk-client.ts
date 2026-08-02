@@ -935,7 +935,12 @@ export class ZendeskClient {
 	}
 
 	// === CHAT API ===
-	async listChats(params?: Record<string, unknown>) {
-		return this.send('GET', '/chats.json', null, params)
+	// No query parameters, because Chat reads none of the ones this client knows how to send.
+	// It is a separate product API with its own pagination scheme, so the shape it does take
+	// has to be established against the live API rather than assumed from the Support ones —
+	// #67 carries that. Taking a `params` nothing could usefully fill was the same inert
+	// argument the tool was advertising, one layer down.
+	async listChats() {
+		return this.send('GET', '/chats.json')
 	}
 }
