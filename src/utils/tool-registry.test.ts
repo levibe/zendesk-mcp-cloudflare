@@ -30,6 +30,19 @@ const register = (server: StubbedServer, tools: ToolDefinition[]) =>
 const publishedBy = (server: StubbedServer): string[] =>
 	server.registerTool.mock.calls.map(([name]) => name as string)
 
+/** The wrapped handler the server was given, which is what a client's call actually runs. */
+const handlerRegisteredBy = (server: StubbedServer): (() => Promise<McpToolResponse>) => {
+	const [, , handler] = server.registerTool.mock.calls[0] as unknown as [
+		string,
+		unknown,
+		() => Promise<McpToolResponse>,
+	]
+
+	return handler
+}
+
+const textOf = (response: McpToolResponse) => response.content[0].text
+
 /** A tool of the given name that does nothing, since only its name decides its fate here. */
 const namedTool = (name: string) => createTool(name, `The ${name} tool`, {}, async () => ({}))
 
@@ -141,16 +154,53 @@ describe('registerTools', () => {
 		})
 
 		register(server, [tool])
-		const [, , handler] = server.registerTool.mock.calls[0] as unknown as [
-			string,
-			unknown,
-			() => Promise<McpToolResponse>,
-		]
 
-		await expect(handler()).resolves.toEqual({
+		await expect(handlerRegisteredBy(server)()).resolves.toEqual({
 			content: [{ type: 'text', text: 'Error: Zendesk API Error: 503 - unavailable' }],
 			isError: true,
 		})
+	})
+
+	// A write's confirmation travels on the definition so that registration can apply it, since
+	// registration owns the only wrapper that turns a result into a response. A handler wording
+	// its own would be wrapped again on the way out — #28.
+	it('heads the result with the success message the definition carries', async () => {
+		const server = stubServer()
+		const created = { macro: { id: 42 } }
+		const tool = createTool(
+			'create_macro',
+			'Create a macro',
+			{},
+			async () => created,
+			'Macro created successfully!'
+		)
+
+		register(server, [tool])
+
+		expect(textOf(await handlerRegisteredBy(server)())).toBe(
+			`Macro created successfully!\n\n${JSON.stringify(created, null, 2)}`
+		)
+	})
+
+	// The half of #28 that mattered: a rejected write has to arrive as a failure. The message is
+	// applied on the success path only, so carrying one cannot dress an error up as a success.
+	it('reports a failed write as an error rather than heading it as a success', async () => {
+		const server = stubServer()
+		const tool = createTool(
+			'create_macro',
+			'Create a macro',
+			{},
+			async () => {
+				throw new Error('Zendesk API Error: 422 - RecordInvalid')
+			},
+			'Macro created successfully!'
+		)
+
+		register(server, [tool])
+		const response = await handlerRegisteredBy(server)()
+
+		expect(response.isError).toBe(true)
+		expect(textOf(response)).toBe('Error: Zendesk API Error: 422 - RecordInvalid')
 	})
 })
 
