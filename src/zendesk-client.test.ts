@@ -79,8 +79,17 @@ const stubUnanswered = () =>
 			})
 	)
 
-/** Advances past both backoff waits — 1s after the first failure, 2s after the second. */
-const drainBackoff = () => vi.advanceTimersByTimeAsync(3000)
+/**
+ * Advances past both backoff waits. They are ranges rather than fixed steps — [500, 1000]
+ * after the first failure and [1000, 2000] after the second — so this has to clear the top of
+ * both, and 3000 is that ceiling rather than the sum of two known waits.
+ *
+ * The extra 500 is deliberate slack. At exactly 3000 this works, but only because a wait that
+ * lands on the boundary still fires; anyone widening the jitter or adding a fourth attempt
+ * would then get `expected 3 calls, got 2` from whichever test ran, pointing at that test
+ * rather than at the budget here that stopped covering it.
+ */
+const drainBackoff = () => vi.advanceTimersByTimeAsync(3500)
 
 let client: ZendeskClient
 
@@ -905,7 +914,7 @@ describe('Retry-After', () => {
 		)
 	})
 
-	// The ladder would have asked again at one second. Retrying sooner than you were told to
+	// The ladder would have asked again within a second. Retrying sooner than you were told to
 	// is worse than not retrying: it spends more of a quota already exhausted, and providers
 	// commonly extend the penalty for a caller that keeps knocking.
 	it('is waited out instead of the client running its own ladder', async () => {
