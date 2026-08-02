@@ -1,8 +1,8 @@
 /**
  * Defining a tool here does not publish it. Registration withholds every write except the
  * ones it names, so most of the create, update and delete tools below are compiled and
- * tested but never offered to a client. `isToolPublished` in utils/tool-registry decides,
- * and is the one place that says which writes are permitted.
+ * tested but never offered to a client. `isToolPublished` in utils/tool-registry applies that
+ * policy, and `WRITE_TOOLS_ENABLED` beside it is the authority on which writes get through.
  */
 
 import { ticketsTools } from './tickets'

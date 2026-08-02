@@ -249,9 +249,11 @@ export class ZendeskClient {
 		// recognises a request that went out and got nothing back — which is worth sending
 		// again. None of the preparation here is that, and several parts of it can throw: a
 		// missing credential below, `btoa` on a token pasted with a smart quote (it rejects
-		// anything outside Latin-1), `JSON.stringify` on a body it cannot serialize. All three
-		// fail identically on the third attempt, so they leave as plain Errors and the
-		// classifier reads them for what they are — no request was ever made.
+		// anything outside Latin-1), `JSON.stringify` on a body it cannot serialize. Leaving as
+		// plain Errors is what stops those being retried: the classifier finds no
+		// ZendeskRequestError in the chain and gives up on the first attempt. Moved inside the
+		// try, each would instead be sent twice more and fail identically both times, for three
+		// seconds of backoff and nothing else.
 		if (!this.subdomain || !this.email || !this.apiToken) {
 			throw new Error('Zendesk credentials not configured. Please set environment variables.')
 		}
@@ -338,8 +340,8 @@ export class ZendeskClient {
 				)
 			}
 
-			// A DELETE answers empty, so the absence of a JSON content type is a success rather
-			// than something to parse.
+			// A success without a JSON content type has no body worth parsing. An empty DELETE
+			// is the case that matters, since it answers with no content type at all.
 			const contentType = response.headers.get('content-type')
 			if (contentType && contentType.includes('application/json')) {
 				try {
