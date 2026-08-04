@@ -90,23 +90,15 @@ pnpm exec wrangler kv namespace create "OAUTH_KV"
 # Update wrangler.jsonc with the returned KV ID
 ```
 
-### 5. Deploy & Test
-
-#### Deploy to Production
+### 5. Deploy and Test
 
 ```bash
 pnpm install
-pnpm run deploy
+pnpm run deploy   # production
+pnpm run dev      # local, on localhost:8788
 ```
 
-#### Local Development
-
-```bash
-pnpm install
-pnpm run dev
-```
-
-#### Test with MCP Inspector
+Then point the MCP Inspector at it:
 
 ```bash
 pnpm dlx @modelcontextprotocol/inspector
@@ -136,13 +128,11 @@ Inside Claude Desktop that is **Settings → Connectors → Add custom connector
 
 An Owner on Team or Enterprise can instead enable the connector for the whole organization, under **Organization settings → Connectors**. That saves everyone adding it, but it does not sign anyone in. Each member still authorizes individually the first time they use it, unless the organization has configured managed authentication.
 
-Either way the connector follows the account rather than the machine, so it appears in Claude Desktop and at claude.ai both, and `claude_desktop_config.json` is not involved at all.
+Either way the connector follows the account rather than the machine, so it appears in Claude Desktop and at claude.ai both, and `claude_desktop_config.json` is not involved at all. Anthropic's servers make the connection rather than your machine, which is why a connector cannot reach a local dev server. `HOSTED_DOMAIN` still governs who may sign in, so this route does not widen access.
 
 `/mcp` is the only endpoint. `/sse` served the superseded HTTP+SSE transport, which MCP revision 2026-07-28 deprecates outright, and it has been removed, so a client configured against it now gets nothing. Clients too old to speak the current revision are still served at `/mcp`, so on transport grounds this only strands one that can speak HTTP+SSE and nothing else.
 
 A browser-based client can be turned away for an unrelated reason. The server validates the `Origin` header whenever a request carries one, accepting localhost and, on a `workers.dev` address, the worker's own hostname. A custom domain is therefore left allowing localhost alone, and any other origin gets a 403. Nothing on this page is affected, since a connector is fetched by Anthropic's servers and `mcp-remote` runs under Node, so neither sends an `Origin` at all. It is only worth knowing if a browser-based client fails with a message about origins rather than about transports.
-
-Anthropic's infrastructure makes this connection rather than the user's machine, so the worker has to be reachable over the public internet, which a deployed worker already is. That is also the property that makes this route viable for people who will never open a terminal: nothing runs locally, so there is nothing local to go wrong. `HOSTED_DOMAIN` still governs who may sign in, so a connector does not widen access.
 
 ### Through the `mcp-remote` proxy
 
@@ -220,13 +210,11 @@ You will be sent through the Google sign-in flow the first time, and `HOSTED_DOM
 
 The connector appears as a Developer mode tool in the composer, and you select it during a conversation rather than it being always on.
 
-The tool list is the same one Claude sees: the reads, plus `create_macro` and `update_macro`. Nothing is published to one client and withheld from another, because registration applies the same policy on every request whoever is asking.
+The tool list is the same one Claude sees. Nothing is published to one client and withheld from another, because registration applies the same policy on every request whoever is asking.
 
 Write actions ask for confirmation before they run. You can tell ChatGPT to remember the answer for the rest of that conversation, and a new conversation starts asking again. Read the arguments rather than waving it through: that prompt is the last thing standing between a model's mistake and a real macro in Zendesk.
 
-Deep research and company knowledge will not use this server at all, for the reason at the top of this section: they only ever reach for `search` and `fetch`.
-
-OpenAI is direct that Developer Mode is for people who understand what they are switching on, and names three risks: prompt injection, a model getting a write wrong, and a malicious server stealing data. The first two apply here as much as anywhere. The third is a question about who runs the server, which in this case is you. What limits the blast radius of the other two is the same thing that limits it for every other client. Deleting a ticket, creating a user and the rest are never offered to anybody, so full access in Developer Mode is full access to a deliberately short list.
+OpenAI is direct that Developer Mode is for people who understand what they are switching on, and names three risks: prompt injection, a model getting a write wrong, and a malicious server stealing data. The third is a question about who runs the server, which here is you. The first two are bounded by the write policy above, so full access in Developer Mode is full access to a deliberately short list.
 
 ## Development
 
