@@ -89,6 +89,122 @@ export const emailSchema = z.string().describe('Email address')
 export const descriptionSchema = z.string().optional().describe('Description')
 
 /**
+ * The fields a ticket write may set, declared once the way the macro shapes below are.
+ *
+ * `comment` is a string here and an object on the wire. A model has a sentence to hand, and
+ * Zendesk wants it wrapped as `{ body: ... }` — the tool handlers do that one rename, which
+ * is why the payload types swap the field out rather than inferring it as written.
+ *
+ * `requester_id` is settable at creation only. Who filed a ticket is a fact about the ticket
+ * rather than a field on it, so the update shape does not offer it.
+ */
+export const createTicketSchema = {
+	subject: z.string().describe('Ticket subject'),
+	comment: z.string().describe('Ticket comment/description'),
+	priority: ticketPrioritySchema.optional().describe('Ticket priority'),
+	status: ticketStatusSchema.optional().describe('Ticket status'),
+	requester_id: z.number().optional().describe('User ID of the requester'),
+	assignee_id: z.number().optional().describe('User ID of the assignee'),
+	group_id: z.number().optional().describe('Group ID for the ticket'),
+	type: ticketTypeSchema.optional().describe('Ticket type'),
+	tags: tagsSchema.describe('Tags for the ticket'),
+}
+
+export const updateTicketSchema = {
+	subject: z.string().optional().describe('Updated ticket subject'),
+	comment: z.string().optional().describe('New comment to add'),
+	priority: ticketPrioritySchema.optional().describe('Updated ticket priority'),
+	status: ticketStatusSchema.optional().describe('Updated ticket status'),
+	assignee_id: z.number().optional().describe('User ID of the new assignee'),
+	group_id: z.number().optional().describe('New group ID for the ticket'),
+	type: ticketTypeSchema.optional().describe('Updated ticket type'),
+	tags: tagsSchema.describe('Updated tags for the ticket'),
+}
+
+/**
+ * What the client actually posts: the schema shape with the comment rename applied. Deriving
+ * these with `Omit` keeps the one reshaping the handlers do visible in the type, instead of a
+ * payload type quietly promising the string form the wire never carries.
+ */
+export type TicketCreatePayload = Omit<InferParams<typeof createTicketSchema>, 'comment'> & {
+	comment: { body: string }
+}
+export type TicketUpdatePayload = Omit<InferParams<typeof updateTicketSchema>, 'comment'> & {
+	comment?: { body: string }
+}
+
+/**
+ * The user writes, where the update shape is deliberately much narrower than the create.
+ *
+ * `email`, `role` and `verified` are settable at creation only. Role decides what a user may
+ * do — `end-user` to `admin` is a privilege escalation in one field — email decides where
+ * their notifications and password resets go, and verified asserts an identity check that
+ * this server has no way to have performed on an existing account. Creating a user states
+ * all three about an account that did not exist a moment ago; rewriting them on someone's
+ * live account is the change that hands the account to somebody else, so all three stay
+ * human actions in the Zendesk UI. The update offers the fields that describe a person —
+ * name, phone, which organization they file under — and none that decide what they may do.
+ */
+export const createUserSchema = {
+	name: nameSchema.describe('User name'),
+	email: emailSchema.describe('User email'),
+	role: userRoleSchema.optional().describe('User role'),
+	verified: z.boolean().optional().describe('Whether the user is verified'),
+	phone: z.string().optional().describe('User phone number'),
+	organization_id: z.number().optional().describe('Organization ID'),
+}
+
+export const updateUserSchema = {
+	name: nameSchema.optional().describe('Updated user name'),
+	phone: z.string().optional().describe('Updated user phone number'),
+	organization_id: z.number().optional().describe('Updated organization ID for the user'),
+}
+
+/**
+ * The organization writes. `domain_names` is create-only, because it is a membership rule
+ * rather than a property: any user whose email matches a listed domain joins the
+ * organization automatically, and organization membership can carry shared ticket
+ * visibility. Adding a domain to an existing organization is how a whole domain of
+ * strangers ends up inside it, so widening one stays a human action in the Zendesk UI.
+ */
+export const createOrganizationSchema = {
+	name: nameSchema.describe('Organization name'),
+	domain_names: z.array(z.string()).optional().describe('Domain names for the organization'),
+	details: descriptionSchema.describe('Details about the organization'),
+	notes: z.string().optional().describe('Notes about the organization'),
+	tags: tagsSchema.describe('Tags for the organization'),
+}
+
+export const updateOrganizationSchema = {
+	name: nameSchema.optional().describe('Updated organization name'),
+	details: descriptionSchema.describe('Updated details about the organization'),
+	notes: z.string().optional().describe('Updated notes about the organization'),
+	tags: z
+		.array(z.string())
+		.optional()
+		.describe(
+			"The organization's complete tag list. Read the organization first and send all of its tags rather than only the new ones, since what arrives replaces the set"
+		),
+}
+
+export const createGroupSchema = {
+	name: nameSchema.describe('Group name'),
+	description: descriptionSchema.describe('Group description'),
+}
+
+export const updateGroupSchema = {
+	name: nameSchema.optional().describe('Updated group name'),
+	description: descriptionSchema.describe('Updated group description'),
+}
+
+export type UserCreatePayload = InferParams<typeof createUserSchema>
+export type UserUpdatePayload = InferParams<typeof updateUserSchema>
+export type OrganizationCreatePayload = InferParams<typeof createOrganizationSchema>
+export type OrganizationUpdatePayload = InferParams<typeof updateOrganizationSchema>
+export type GroupCreatePayload = InferParams<typeof createGroupSchema>
+export type GroupUpdatePayload = InferParams<typeof updateGroupSchema>
+
+/**
  * A single thing a macro does when an agent applies it.
  *
  * Zendesk writes an action's value one of three ways, and the union is exactly those three.
@@ -390,6 +506,96 @@ export type AutomationCreatePayload = InferParams<typeof createAutomationSchema>
 	active: false
 }
 export type AutomationUpdatePayload = InferParams<typeof updateAutomationSchema>
+
+/**
+ * How a view presents the tickets its conditions match: which columns show, and how the rows
+ * group and sort. `columns` is required and non-empty because what a queue displays is the
+ * queue — a view nobody stated columns for is a list of untitled rows, created-looking and
+ * useless. The grouping and sorting fields are Zendesk's own defaults when left out.
+ */
+export const viewOutputSchema = z.object({
+	columns: z
+		.array(z.string())
+		.min(1)
+		.describe('Ticket fields shown as columns, e.g. subject, status, assignee, updated'),
+	group_by: z.string().optional().describe('Field the rows are grouped by'),
+	group_order: z.enum(['asc', 'desc']).optional().describe('Direction the groups are ordered in'),
+	sort_by: z.string().optional().describe('Field the rows are sorted by'),
+	sort_order: z.enum(['asc', 'desc']).optional().describe('Direction the rows are sorted in'),
+})
+
+/**
+ * Which agents a view is offered to: some named groups, or every agent.
+ *
+ * Zendesk also restricts views to a single user, which is deliberately not modelled. A view
+ * restricted to a user is that person's personal view, and the only user these credentials
+ * can build one for is the service account itself — a queue nobody would ever see.
+ *
+ * A view never widens what an agent can read: restriction decides who is offered the queue,
+ * and the tickets in it are only ever ones the agent could already open.
+ */
+export const viewRestrictionSchema = z.object({
+	type: z.literal('Group').describe('Restrict the view to agent groups'),
+	ids: z.array(idSchema).min(1).describe('IDs of the groups that may use the view'),
+})
+
+/**
+ * The fields a view write may set.
+ *
+ * `conditions` reuses the business rule grammar above, because Zendesk's views run on the
+ * same condition framework — but the wire shape differs: a view takes `all` and `any` at the
+ * top level of the view object rather than nested under `conditions`. The tools keep the
+ * nested shape so a model that has learned one condition grammar can reuse it, and the
+ * handlers flatten it at the call. That flattening is why the payload types below swap
+ * `conditions` for the two arrays.
+ *
+ * `restriction` is required and nullable for the reason `user_segment_id` is on an article:
+ * `null` means every agent, and a caller has to have said so rather than inherited it.
+ *
+ * `active` is deliberately absent from both shapes, exactly as it is for triggers and
+ * automations. A view does not act, but it is where agents work: a wrongly-filtered queue
+ * misdirects a team in proportion to how much they trust it. So a view this server builds
+ * arrives inactive, and showing it to agents is a human action in the Zendesk UI.
+ */
+export const createViewSchema = {
+	title: z.string().min(1).describe('View title, shown to agents as the name of the queue'),
+	description: descriptionSchema.describe('View description'),
+	conditions: businessRuleConditionsSchema.describe(
+		'Which tickets the view lists, as the same all/any condition groups triggers use'
+	),
+	output: viewOutputSchema.describe('Which columns the view shows and how rows group and sort'),
+	restriction: viewRestrictionSchema
+		.nullable()
+		.describe(
+			'Which agent groups are offered the view, or null to offer it to every agent. Required rather than optional, because who works a queue is not something to leave to a default'
+		),
+}
+
+export const updateViewSchema = {
+	title: z.string().min(1).optional().describe('Updated view title'),
+	description: descriptionSchema,
+	conditions: businessRuleConditionsSchema
+		.optional()
+		.describe(
+			'Replacement conditions, as the same all/any groups triggers use. Send the complete set: what arrives replaces every existing condition rather than adding to them'
+		),
+	output: viewOutputSchema
+		.optional()
+		.describe('Replacement output. Send the complete column list, not only the new columns'),
+}
+
+/**
+ * The wire shape: `conditions` flattened into top-level `all`/`any`, and creation pinned
+ * dormant. `active: false` is held in the type for the reason the business rule payloads hold
+ * it — the schemas never accept the field, so it can only come from the handler, and stating
+ * it here makes forgetting it a compile error rather than a live queue.
+ */
+type ViewConditionGroups = z.infer<typeof businessRuleConditionsSchema>
+
+export type ViewCreatePayload = Omit<InferParams<typeof createViewSchema>, 'conditions'> &
+	ViewConditionGroups & { active: false }
+export type ViewUpdatePayload = Omit<InferParams<typeof updateViewSchema>, 'conditions'> &
+	Partial<ViewConditionGroups>
 
 /**
  * What an article says, which Zendesk keeps on the article's translation rather than on the

@@ -5,10 +5,11 @@ import {
 	sortingSchema,
 	userRoleSchema,
 	idSchema,
-	nameSchema,
-	emailSchema,
+	createUserSchema,
+	updateUserSchema,
 } from '../types/zendesk'
 import { createTool } from '../utils/tool-registry'
+import { requireChanges } from '../utils/require-changes'
 import { executeSearchWithStandardizedResponse } from '../utils/search-response'
 
 export const usersTools: ToolDefinition[] = [
@@ -35,30 +36,29 @@ export const usersTools: ToolDefinition[] = [
 		}
 	),
 
+	// Withheld by `WRITE_TOOLS_ENABLED` in utils/tool-registry, like every write below that is
+	// not named there. Who a user is — their email, role and verified state — is settable at
+	// creation only; see `createUserSchema` for that argument.
 	createTool(
 		'create_user',
 		'Create a new user',
-		{
-			name: nameSchema.describe('User name'),
-			email: emailSchema.describe('User email'),
-			role: userRoleSchema.optional().describe('User role'),
-			verified: z.boolean().optional().describe('Whether the user is verified'),
-			phone: z.string().optional().describe('User phone number'),
-			organization_id: z.number().optional().describe('Organization ID'),
-		},
+		createUserSchema,
 		async (client, params) => {
-			const userData = {
-				name: params.name,
-				email: params.email,
-				role: params.role,
-				verified: params.verified,
-				phone: params.phone,
-				organization_id: params.organization_id,
-			}
-
-			return client.createUser(userData)
+			return client.createUser(params)
 		},
 		'User created successfully!'
+	),
+
+	createTool(
+		'update_user',
+		"Update an existing user's profile fields. Any field left out keeps its current value. This cannot change a user's email, role or verified state — those are set at creation and managed in the Zendesk UI.",
+		{ id: idSchema.describe('User ID to update'), ...updateUserSchema },
+		async (client, { id, ...changes }) => {
+			requireChanges('update_user', updateUserSchema, changes)
+
+			return client.updateUser(id, changes)
+		},
+		'User updated successfully!'
 	),
 
 	createTool(

@@ -4,10 +4,20 @@ import type {
 	ArticleUpdatePayload,
 	AutomationCreatePayload,
 	AutomationUpdatePayload,
+	GroupCreatePayload,
+	GroupUpdatePayload,
 	MacroCreatePayload,
 	MacroUpdatePayload,
+	OrganizationCreatePayload,
+	OrganizationUpdatePayload,
+	TicketCreatePayload,
+	TicketUpdatePayload,
 	TriggerCreatePayload,
 	TriggerUpdatePayload,
+	UserCreatePayload,
+	UserUpdatePayload,
+	ViewCreatePayload,
+	ViewUpdatePayload,
 } from './types/zendesk'
 
 interface ZendeskClientConfig {
@@ -670,11 +680,11 @@ export class ZendeskClient {
 		return this.send('GET', `/tickets/${id}.json`)
 	}
 
-	async createTicket(data: any) {
+	async createTicket(data: TicketCreatePayload) {
 		return this.send('POST', '/tickets.json', { ticket: data })
 	}
 
-	async updateTicket(id: number, data: any) {
+	async updateTicket(id: number, data: TicketUpdatePayload) {
 		this.validateId(id)
 		return this.send('PUT', `/tickets/${id}.json`, { ticket: data })
 	}
@@ -706,11 +716,11 @@ export class ZendeskClient {
 		return this.send('GET', `/users/${id}.json`)
 	}
 
-	async createUser(data: any) {
+	async createUser(data: UserCreatePayload) {
 		return this.send('POST', '/users.json', { user: data })
 	}
 
-	async updateUser(id: number, data: any) {
+	async updateUser(id: number, data: UserUpdatePayload) {
 		this.validateId(id)
 		return this.send('PUT', `/users/${id}.json`, { user: data })
 	}
@@ -730,11 +740,11 @@ export class ZendeskClient {
 		return this.send('GET', `/organizations/${id}.json`)
 	}
 
-	async createOrganization(data: any) {
+	async createOrganization(data: OrganizationCreatePayload) {
 		return this.send('POST', '/organizations.json', { organization: data })
 	}
 
-	async updateOrganization(id: number, data: any) {
+	async updateOrganization(id: number, data: OrganizationUpdatePayload) {
 		this.validateId(id)
 		return this.send('PUT', `/organizations/${id}.json`, { organization: data })
 	}
@@ -754,11 +764,11 @@ export class ZendeskClient {
 		return this.send('GET', `/groups/${id}.json`)
 	}
 
-	async createGroup(data: any) {
+	async createGroup(data: GroupCreatePayload) {
 		return this.send('POST', '/groups.json', { group: data })
 	}
 
-	async updateGroup(id: number, data: any) {
+	async updateGroup(id: number, data: GroupUpdatePayload) {
 		this.validateId(id)
 		return this.send('PUT', `/groups/${id}.json`, { group: data })
 	}
@@ -779,9 +789,9 @@ export class ZendeskClient {
 	}
 
 	/**
-	 * The two typed payloads on this client. Their types come from the macro tools' own Zod
-	 * schemas, so what a caller may send is whatever MCP already validated. The other sixteen
-	 * create and update payloads are still `any` and are #12's to settle.
+	 * Every create and update payload on this client is typed like these two: derived from the
+	 * tool's own Zod schema in types/zendesk.ts, so what a caller may send is whatever MCP
+	 * already validated, and neither shape is written a second time against Zendesk's docs.
 	 */
 	async createMacro(data: MacroCreatePayload) {
 		return this.send('POST', '/macros.json', { macro: data })
@@ -807,11 +817,11 @@ export class ZendeskClient {
 		return this.send('GET', `/views/${id}.json`)
 	}
 
-	async createView(data: any) {
+	async createView(data: ViewCreatePayload) {
 		return this.send('POST', '/views.json', { view: data })
 	}
 
-	async updateView(id: number, data: any) {
+	async updateView(id: number, data: ViewUpdatePayload) {
 		this.validateId(id)
 		return this.send('PUT', `/views/${id}.json`, { view: data })
 	}

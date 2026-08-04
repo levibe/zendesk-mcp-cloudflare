@@ -4,11 +4,11 @@ import {
 	paginationSchema,
 	sortingSchema,
 	idSchema,
-	nameSchema,
-	tagsSchema,
-	descriptionSchema,
+	createOrganizationSchema,
+	updateOrganizationSchema,
 } from '../types/zendesk'
 import { createTool } from '../utils/tool-registry'
+import { requireChanges } from '../utils/require-changes'
 import { executeSearchWithStandardizedResponse } from '../utils/search-response'
 
 export const organizationsTools: ToolDefinition[] = [
@@ -30,20 +30,29 @@ export const organizationsTools: ToolDefinition[] = [
 		}
 	),
 
+	// Withheld by `WRITE_TOOLS_ENABLED` in utils/tool-registry. `domain_names` is settable at
+	// creation only, because it is a membership rule rather than a property — see
+	// `createOrganizationSchema` for that argument.
 	createTool(
 		'create_organization',
 		'Create a new organization',
-		{
-			name: nameSchema.describe('Organization name'),
-			domain_names: z.array(z.string()).optional().describe('Domain names for the organization'),
-			details: descriptionSchema.describe('Details about the organization'),
-			notes: z.string().optional().describe('Notes about the organization'),
-			tags: tagsSchema.describe('Tags for the organization'),
-		},
+		createOrganizationSchema,
 		async (client, params) => {
 			return client.createOrganization(params)
 		},
 		'Organization created successfully!'
+	),
+
+	createTool(
+		'update_organization',
+		"Update an existing organization. Any field left out keeps its current value, except that sending tags replaces the whole set. This cannot change the organization's domain names, which decide automatic membership and are managed in the Zendesk UI.",
+		{ id: idSchema.describe('Organization ID to update'), ...updateOrganizationSchema },
+		async (client, { id, ...changes }) => {
+			requireChanges('update_organization', updateOrganizationSchema, changes)
+
+			return client.updateOrganization(id, changes)
+		},
+		'Organization updated successfully!'
 	),
 
 	createTool(

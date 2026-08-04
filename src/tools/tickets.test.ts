@@ -1,8 +1,7 @@
 /**
- * The ticket writes are the only handlers that reshape what they are given before sending it,
- * which is what earns them tests while the passthrough writes get none. `create_ticket` renames
- * a field, `update_ticket` decides which fields travel at all, and `delete_ticket` words its own
- * answer because a successful delete comes back empty.
+ * The ticket writes reshape what they are given before sending it, which is what earns them
+ * tests: both wrap the comment string into the `{ body }` object Zendesk wants, and
+ * `delete_ticket` words its own answer because a successful delete comes back empty.
  *
  * None of the three is published today — registration withholds every write but the two macro
  * ones — so these cover the payloads rather than anything a client can currently reach.
@@ -10,20 +9,17 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { ticketsTools } from './tickets'
+import type { TicketCreatePayload, TicketUpdatePayload } from '../types/zendesk'
 import type { ZendeskClient } from '../zendesk-client'
 
 const createTicket = ticketsTools.find((tool) => tool.name === 'create_ticket')!
 const updateTicket = ticketsTools.find((tool) => tool.name === 'update_ticket')!
 const deleteTicket = ticketsTools.find((tool) => tool.name === 'delete_ticket')!
 
-/**
- * Stands in for the three client methods, matching the arguments each takes and the order they
- * come in. The payloads are narrowed to what the handlers build rather than to what the client
- * declares, which is `any` on both — the open question #12 carries, not something to mirror here.
- */
+/** Stands in for the three client methods, under the signatures they actually declare. */
 const stubClient = (ticket: unknown = { ticket: { id: 42 } }) => ({
-	createTicket: vi.fn(async (_data: Record<string, unknown>) => ticket),
-	updateTicket: vi.fn(async (_id: number, _data: Record<string, unknown>) => ticket),
+	createTicket: vi.fn(async (_data: TicketCreatePayload) => ticket),
+	updateTicket: vi.fn(async (_id: number, _data: TicketUpdatePayload) => ticket),
 	deleteTicket: vi.fn(async (_id: number) => ({})),
 })
 
@@ -78,17 +74,16 @@ describe('create_ticket', () => {
 		})
 	})
 
-	// Every optional field is written unconditionally, so one nobody supplied rides along as
-	// `undefined` rather than being left out. That is why create needs none of the guards update
-	// has: the client serializes the body with JSON.stringify, which drops an undefined value, so
-	// the request Zendesk receives carries only the fields that were actually set.
-	it('leaves an unsupplied field undefined rather than omitting it', async () => {
+	// The handler spreads what it was given, and MCP's validation strips what nobody supplied,
+	// so the payload never carries the field at all — there is no undefined for JSON.stringify
+	// to have to drop.
+	it('omits a field nobody supplied rather than sending it as undefined', async () => {
 		const client = stubClient()
 
 		await call(createTicket, client, { subject: 'Printer down', comment: 'It will not print' })
 		const payload = created(client)
 
-		expect(payload).toHaveProperty('priority', undefined)
+		expect(payload).not.toHaveProperty('priority')
 		expect(payload).toEqual({
 			subject: 'Printer down',
 			comment: { body: 'It will not print' },
@@ -121,10 +116,6 @@ describe('update_ticket', () => {
 		expect(updated(client)).not.toHaveProperty('id')
 	})
 
-	// One assertion over all eight guards, because they are eight copies of a line and the mistake
-	// they invite is a copy that names the wrong field on one side — `ticketData.group_id =
-	// params.assignee_id` reads correctly and silently sends the wrong value. Naming every field
-	// once is what catches that, and what catches a guard someone drops.
 	it('passes every optional field it was given straight through', async () => {
 		const client = stubClient()
 
@@ -160,10 +151,9 @@ describe('update_ticket', () => {
 		expect(client.updateTicket).toHaveBeenCalledWith(42, { comment: { body: 'Following up' } })
 	})
 
-	// Zendesk updates the fields it is given and leaves the rest of the ticket alone, so the eight
-	// guards exist to tell "not supplied" apart from "supplied as something falsy". This is the
-	// case that separates them: rewritten as a truthiness check, every guard would still pass the
-	// tests above and would silently stop forwarding this one.
+	// Zendesk updates the fields it is given and leaves the rest of the ticket alone, so what
+	// matters is that "supplied as something falsy" still travels — a truthiness check anywhere
+	// in the handler would silently stop forwarding this one.
 	it('forwards a field it was given even when the value is falsy', async () => {
 		const client = stubClient()
 
@@ -172,17 +162,15 @@ describe('update_ticket', () => {
 		expect(client.updateTicket).toHaveBeenCalledWith(42, { subject: '' })
 	})
 
-	// Pinned rather than endorsed. `update_macro` refuses an update carrying no fields, because
-	// Zendesk accepts one, changes nothing, and reports success — which is not what a model that
-	// forgot to send fields needs to hear. `update_ticket` has no such guard and sends the empty
-	// payload. Only the macro one is reachable today, so the divergence costs nothing yet — the
-	// laxer of the two is the one no client can call. If this grows a guard, invert this test.
-	it('sends an empty payload when it was given nothing to change', async () => {
+	// Zendesk accepts an update with nothing in it and changes nothing, which reads back as a
+	// success. A model that sent no fields meant to send some, so say that instead.
+	it('refuses an update that changes nothing rather than calling Zendesk', async () => {
 		const client = stubClient()
 
-		await call(updateTicket, client, { id: 42 })
-
-		expect(client.updateTicket).toHaveBeenCalledWith(42, {})
+		await expect(call(updateTicket, client, { id: 42 })).rejects.toThrow(
+			'update_ticket needs at least one field to change'
+		)
+		expect(client.updateTicket).not.toHaveBeenCalled()
 	})
 })
 
