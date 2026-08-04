@@ -19,7 +19,7 @@ The server reads widely and writes only macros. Reading covers:
 - **Triggers**: List and fetch triggers
 - **Automations**: List and fetch automations
 - **Search**: Search across all Zendesk data
-- **Help Center**: Browse and search the knowledge base — articles, sections and categories
+- **Help Center**: Browse and search the knowledge base: articles, sections and categories
 - **Support**: General configuration information
 - **Talk**: Access call center statistics
 - **Chat**: Read chat conversations
@@ -29,7 +29,7 @@ Writing is limited to creating and updating macros. [Available Tools](#available
 ### Technical Features
 
 - **Google OAuth Authentication**: Secure user authentication flow
-- **Remote MCP Protocol**: Streamable HTTP, stateless — each request stands alone, with no session to establish or keep alive
+- **Remote MCP Protocol**: Streamable HTTP, stateless, so each request stands alone with no session to establish or keep alive
 - **Cloudflare Workers**: Serverless deployment with global edge distribution
 - **Type Safety**: Full TypeScript implementation with Zod validation
 - **Error Handling**: Comprehensive error handling with user-friendly messages
@@ -144,13 +144,13 @@ URL    https://zendesk-mcp.<your-subdomain>.workers.dev/mcp
 
 Inside Claude Desktop that is **Settings → Connectors → Add custom connector**, which `Cmd+,` opens directly. At claude.ai it sits under **Customize → Connectors** instead, behind the **+** button.
 
-An Owner on Team or Enterprise can instead enable the connector for the whole organization, under **Organization settings → Connectors**. That saves everyone adding it, but it does not sign anyone in — each member still authorizes individually the first time they use it, unless the organization has configured managed authentication.
+An Owner on Team or Enterprise can instead enable the connector for the whole organization, under **Organization settings → Connectors**. That saves everyone adding it, but it does not sign anyone in. Each member still authorizes individually the first time they use it, unless the organization has configured managed authentication.
 
 Either way the connector follows the account rather than the machine, so it appears in Claude Desktop and at claude.ai both, and `claude_desktop_config.json` is not involved at all.
 
-`/mcp` is the only endpoint. `/sse` served the superseded HTTP+SSE transport, which MCP revision 2026-07-28 deprecates outright, and it has been removed — a client configured against it now gets nothing. Clients too old to speak the current revision are still served at `/mcp`, so on transport grounds this only strands one that can speak HTTP+SSE and nothing else.
+`/mcp` is the only endpoint. `/sse` served the superseded HTTP+SSE transport, which MCP revision 2026-07-28 deprecates outright, and it has been removed, so a client configured against it now gets nothing. Clients too old to speak the current revision are still served at `/mcp`, so on transport grounds this only strands one that can speak HTTP+SSE and nothing else.
 
-One other kind of client is turned away, for an unrelated reason. The server validates the `Origin` header whenever a request carries one. By default it accepts localhost, and also the worker's own hostname when you are on a `workers.dev` address — so a page served from the worker itself is fine, while a custom domain is left allowing localhost alone. Any other origin gets a 403. Nothing described on this page is affected, since a connector is fetched by Anthropic's servers and `mcp-remote` runs under Node, and neither sends an `Origin` at all. It is simply the first thing to check if a browser-based client fails with a message about origins rather than about transports.
+One other kind of client is turned away, for an unrelated reason. The server validates the `Origin` header whenever a request carries one. By default it accepts localhost, and also the worker's own hostname when you are on a `workers.dev` address, so a page served from the worker itself is fine while a custom domain is left allowing localhost alone. Any other origin gets a 403. Nothing described on this page is affected, since a connector is fetched by Anthropic's servers and `mcp-remote` runs under Node, and neither sends an `Origin` at all. It is simply the first thing to check if a browser-based client fails with a message about origins rather than about transports.
 
 Anthropic's infrastructure makes this connection rather than the user's machine, so the worker has to be reachable over the public internet, which a deployed worker already is. That is also the property that makes this route viable for people who will never open a terminal: nothing runs locally, so there is nothing local to go wrong. `HOSTED_DOMAIN` still governs who may sign in, so a connector does not widen access.
 
@@ -182,13 +182,13 @@ The file usually already holds your app preferences, so add `mcpServers` alongsi
 }
 ```
 
-Claude Desktop reads this file only at launch, so quit it fully and start it again — closing the window leaves it running in the background and changes nothing. On macOS press Cmd+Q, and on Windows right-click the tray icon and choose Quit. To point at a local server instead, run `pnpm run dev` and use `http://localhost:8788/mcp`.
+Claude Desktop reads this file only at launch, so quit it fully and start it again. Closing the window leaves it running in the background and changes nothing. On macOS press Cmd+Q, and on Windows right-click the tray icon and choose Quit. To point at a local server instead, run `pnpm run dev` and use `http://localhost:8788/mcp`.
 
 This route asks a lot more of the machine, and the failures are worth knowing before handing it to anyone:
 
 - **Node has to be installed.** `npx` is not present on a machine without Node, which rules this out for most non-technical users on its own.
-- **Two timers run against first-time sign-in, and both are short.** `mcp-remote` waits 30 seconds for the OAuth callback unless `--auth-timeout` says otherwise, and Claude Desktop separately cancels a server that has not finished initializing within 60 seconds. Picking a Google account can outlast either. The symptom is a browser landing on `localhost:<port>` with nothing listening, because the proxy was gone before the redirect came back. Retrying usually works, since the second attempt reuses the approval cookie and the Google session — which is exactly why this is easy to dismiss as a fluke.
-- **A slow tool call gets dropped.** Node's fetch abandons a response body after 300 seconds of silence, which surfaces as `Body Timeout Error` and a reconnect underneath you — and reconnecting can re-enter the auth path and open a browser window unprompted. This used to be the common failure, because the server held a stream open between calls for the old transport to push down. It no longer holds one, so the only way to sit silent that long now is a single Zendesk request taking five minutes.
+- **Two timers run against first-time sign-in, and both are short.** `mcp-remote` waits 30 seconds for the OAuth callback unless `--auth-timeout` says otherwise, and Claude Desktop separately cancels a server that has not finished initializing within 60 seconds. Picking a Google account can outlast either. The symptom is a browser landing on `localhost:<port>` with nothing listening, because the proxy was gone before the redirect came back. Retrying usually works, since the second attempt reuses the approval cookie and the Google session, which is exactly why this is easy to dismiss as a fluke.
+- **A slow tool call gets dropped.** Node's fetch abandons a response body after 300 seconds of silence, which surfaces as `Body Timeout Error` and a reconnect underneath you, and reconnecting can re-enter the auth path and open a browser window unprompted. This used to be the common failure, because the server held a stream open between calls for the old transport to push down. It no longer holds one, so the only way to sit silent that long now is a single Zendesk request taking five minutes.
 - **Windows cannot find `npx`.** Claude Desktop spawns the command without a shell, so the `.cmd` shim never resolves. Use `"command": "cmd"` with `"args": ["/c", "npx", "mcp-remote", "<your-url>"]`.
 - **Tokens are cached on disk.** They live in `~/.mcp-auth` on macOS and `%USERPROFILE%\.mcp-auth` on Windows. Delete that folder if authentication gets stuck after a URL change. A stale lockfile there needs no attention, since the proxy detects and clears it.
 
@@ -242,11 +242,11 @@ OpenAI is direct that Developer Mode is for people who understand what they are 
 
 The server reads widely and writes almost nothing.
 
-**Reading** covers tickets, users, organizations, groups, macros, views, triggers, automations, Talk statistics, Chat conversations and the whole Help Center — listing them, fetching one by ID, and searching. Anything named `list_*`, `get_*` or `search_*` is available, along with `search` and `support_info`.
+**Reading** covers tickets, users, organizations, groups, macros, views, triggers, automations, Talk statistics, Chat conversations and the whole Help Center. You can list them, fetch one by ID, and search. Anything named `list_*`, `get_*` or `search_*` is available, along with `search` and `support_info`.
 
-**Writing** is limited to `create_macro` and `update_macro`. A macro is a shortcut an agent applies to a ticket by hand, so creating one changes nothing on its own — which is why these two are permitted where nothing else is.
+**Writing** is limited to `create_macro` and `update_macro`. A macro is a shortcut an agent applies to a ticket by hand, so creating one changes nothing on its own, which is why these two are permitted where nothing else is.
 
-**Everything else is refused.** Creating, updating and deleting a ticket, and creating a user, an organization or a group, are all written and working in the code but never offered to a client, so asking for them will not work. Nothing else writes at all — deleting a macro, for instance, was never built as a tool. The server logs what it withheld each time it starts.
+**Everything else is refused.** Creating, updating and deleting a ticket, and creating a user, an organization or a group, are all written and working in the code but never offered to a client, so asking for them will not work. Nothing else writes at all. Deleting a macro, for instance, was never built as a tool. The server logs what it withheld each time it starts.
 
 The permitted set is decided in `src/utils/tool-registry.ts`, and the tools themselves are defined under `src/tools/`. See CLAUDE.md for how a tool gets permitted.
 
