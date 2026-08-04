@@ -75,7 +75,7 @@ pnpm exec wrangler secret put HOSTED_DOMAIN # Optional: restrict to specific Goo
 
 For local development, create `.dev.vars`:
 
-```
+```text
 GOOGLE_CLIENT_ID=your_dev_client_id
 GOOGLE_CLIENT_SECRET=your_dev_client_secret
 ZENDESK_SUBDOMAIN=your_subdomain
@@ -119,7 +119,7 @@ There are two routes in, and they behave differently enough that the choice matt
 
 Claude holds remote MCP servers on your account rather than in a file on disk, so there is nothing to install and no Node runtime on the machine. Each person adds it once themselves, and it asks for a display name as well as the URL:
 
-```
+```text
 Name   Momentum Zendesk
 URL    https://zendesk-mcp.<your-subdomain>.workers.dev/mcp
 ```
@@ -189,7 +189,11 @@ ChatGPT consumes an MCP server in two quite different ways. An ordinary connecto
 
 ### Enabling Developer Mode
 
-It is a beta feature on the web, available on Pro, Plus, Business, Enterprise and Education accounts. Find it under **Settings → Security and login** and turn on the **Developer mode** toggle. That toggle has moved between releases and previously lived under **Settings → Connectors → Advanced settings**, so look there if it is not where you expect.
+It is a beta feature on the web, available on Pro, Plus, Business, Enterprise and Education accounts.
+
+OpenAI's documentation contradicts itself about writes. The developer guide gives all five plans both read and write, while the help articles limit write actions to Business, Enterprise and Education and leave Pro reading only. Only `create_macro` and `update_macro` are at stake either way, so on a personal plan expect the reads to work and do not count on the two macro tools.
+
+Find the toggle under **Settings → Security and login** and turn on **Developer mode**. That toggle has moved between releases and previously lived under **Settings → Connectors → Advanced settings**, so look there if it is not where you expect.
 
 On a Business or Enterprise workspace an administrator can switch Developer Mode off for everyone, or allow only named connectors. A missing toggle on a work account usually means that rather than an unsupported plan.
 
@@ -197,7 +201,7 @@ On a Business or Enterprise workspace an administrator can switch Developer Mode
 
 With Developer Mode on, create a connector and give it a name, the URL and OAuth as the authentication method:
 
-```
+```text
 Name   Momentum Zendesk
 URL    https://zendesk-mcp.<your-subdomain>.workers.dev/mcp
 ```
