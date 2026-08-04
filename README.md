@@ -201,6 +201,43 @@ Authenticate through the browser flow when prompted, then ask Claude to:
 - "List all users in the Sales organization"
 - "Draft a macro that solves a ticket and thanks the customer"
 
+## Connecting ChatGPT
+
+ChatGPT speaks MCP as well, so this server works there, but only through Developer Mode, and it is worth understanding why that is the only route before you start.
+
+ChatGPT consumes an MCP server in two quite different ways. An ordinary connector, the kind behind deep research and company knowledge, never calls arbitrary tools: it calls exactly two, named `search` and `fetch`, returning a shape OpenAI specifies. This server publishes neither, so ChatGPT will refuse to add it that way. Developer Mode is the other route, and there the whole published tool list is callable, which is more than the two-tool connector would ever have given you.
+
+### Enabling Developer Mode
+
+It is a beta feature on the web, available on Pro, Plus, Business, Enterprise and Education accounts. Find it under **Settings → Security and login** and turn on the **Developer mode** toggle. That toggle has moved between releases and previously lived under **Settings → Connectors → Advanced settings**, so look there if it is not where you expect.
+
+On a Business or Enterprise workspace an administrator can switch Developer Mode off for everyone, or allow only named connectors. A missing toggle on a work account usually means that rather than an unsupported plan.
+
+### Adding the server
+
+With Developer Mode on, create a connector and give it a name, the URL and OAuth as the authentication method:
+
+```
+Name   Momentum Zendesk
+URL    https://zendesk-mcp.<your-subdomain>.workers.dev/mcp
+```
+
+Use `/mcp`. Ignore any instruction that a remote MCP URL has to end in `/sse`, including some of OpenAI's own documentation. That endpoint served the superseded transport and has been removed here, as described above. ChatGPT speaks Streamable HTTP, which is what `/mcp` answers.
+
+You will be sent through the Google sign-in flow the first time, and `HOSTED_DOMAIN` governs who may complete it, exactly as it does for a Claude connector. ChatGPT registers itself through `/register` on the way past, so there is no client ID to create or paste anywhere.
+
+### Living with it
+
+The connector appears as a Developer mode tool in the composer, and you select it during a conversation rather than it being always on.
+
+The tool list is the same one Claude sees: the reads, plus `create_macro` and `update_macro`. Nothing is published to one client and withheld from another, because registration applies the same policy on every request whoever is asking.
+
+Write actions ask for confirmation before they run. You can tell ChatGPT to remember the answer for the rest of that conversation, and a new conversation starts asking again. Read the arguments rather than waving it through: that prompt is the last thing standing between a model's mistake and a real macro in Zendesk.
+
+Deep research and company knowledge will not use this server at all, for the reason at the top of this section: they only ever reach for `search` and `fetch`.
+
+OpenAI is direct that Developer Mode is for people who understand what they are switching on, and names three risks: prompt injection, a model getting a write wrong, and a malicious server stealing data. The first two apply here as much as anywhere. The third is a question about who runs the server, which in this case is you. What limits the blast radius of the other two is the same thing that limits it for every other client. Deleting a ticket, creating a user and the rest are never offered to anybody, so full access in Developer Mode is full access to a deliberately short list.
+
 ## Available Tools
 
 The server reads widely and writes almost nothing.
