@@ -1,9 +1,11 @@
 /**
  * What these pin is the gap between the two user shapes: creation states who a user is, and
  * the update deliberately cannot restate it. `email` decides where the account's mail goes,
- * `role` decides what it may do, and `verified` asserts a check this server never performed —
- * so all three are settable at creation only, and an update that smuggles one in loses it at
- * validation rather than rewriting somebody's account.
+ * `role` decides what it may do, `verified` asserts a check this server never performed, and
+ * `organization_id` decides what shared tickets they may see — so all four are settable at
+ * creation only, and an update that smuggles one in loses it at validation rather than
+ * rewriting somebody's account. Creation itself refuses `admin`, since an admin account with
+ * a caller-chosen email is a takeover in one call.
  */
 
 import { describe, expect, it, vi } from 'vitest'
@@ -37,12 +39,27 @@ describe('the user schemas', () => {
 
 	// The identity fields. Zod strips what a shape does not declare, so a smuggled one is
 	// absent from the parsed update rather than refused — absence is the guarantee.
-	it.each(['email', 'role', 'verified'])(
+	it.each(['email', 'role', 'verified', 'organization_id'])(
 		'the update shape does not accept %s, so an update cannot change who a user is',
 		(field) => {
 			expect(updatePayload.parse({ [field]: 'admin' })).not.toHaveProperty(field)
 		}
 	)
+
+	// Refused rather than stripped, because it arrives through a field the shape does accept.
+	// An admin account with a caller-chosen email is a takeover in one call — the password
+	// reset goes wherever the email points — so minting one stays a human action.
+	it('creation refuses the admin role outright', () => {
+		const user = { name: 'Ada', email: 'ada@example.com', role: 'admin' }
+
+		expect(createPayload.safeParse(user).success).toBe(false)
+	})
+
+	it.each(['end-user', 'agent'])('creation accepts the %s role', (role) => {
+		const user = { name: 'Ada', email: 'ada@example.com', role }
+
+		expect(createPayload.safeParse(user).success).toBe(true)
+	})
 })
 
 describe('update_user', () => {

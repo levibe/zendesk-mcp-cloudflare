@@ -118,7 +118,12 @@ export const updateTicketSchema = {
 	assignee_id: z.number().optional().describe('User ID of the new assignee'),
 	group_id: z.number().optional().describe('New group ID for the ticket'),
 	type: ticketTypeSchema.optional().describe('Updated ticket type'),
-	tags: tagsSchema.describe('Updated tags for the ticket'),
+	tags: z
+		.array(z.string())
+		.optional()
+		.describe(
+			"The ticket's complete tag list. Read the ticket with get_ticket first and send all of its tags rather than only the new ones, since what arrives replaces the set"
+		),
 }
 
 /**
@@ -137,18 +142,31 @@ export type TicketUpdatePayload = Omit<InferParams<typeof updateTicketSchema>, '
  * The user writes, where the update shape is deliberately much narrower than the create.
  *
  * `email`, `role` and `verified` are settable at creation only. Role decides what a user may
- * do — `end-user` to `admin` is a privilege escalation in one field — email decides where
- * their notifications and password resets go, and verified asserts an identity check that
- * this server has no way to have performed on an existing account. Creating a user states
- * all three about an account that did not exist a moment ago; rewriting them on someone's
- * live account is the change that hands the account to somebody else, so all three stay
- * human actions in the Zendesk UI. The update offers the fields that describe a person —
- * name, phone, which organization they file under — and none that decide what they may do.
+ * do, email decides where their notifications and password resets go, and verified asserts an
+ * identity check that this server has no way to have performed on an existing account.
+ * Creating a user states all three about an account that did not exist a moment ago;
+ * rewriting them on someone's live account is the change that hands the account to somebody
+ * else, so all three stay human actions in the Zendesk UI.
+ *
+ * `role` refuses `admin` outright, at creation too, on the guardrail pattern the notification
+ * actions set: the schema turns away what these tools must never build, independent of
+ * whether the tool is published. An admin account with a caller-chosen email is a takeover in
+ * one call — the password reset goes wherever the email points — so minting one stays human.
+ *
+ * `organization_id` is create-only for the reason `domain_names` is on an organization:
+ * membership can carry shared ticket visibility, so moving a user into an organization is a
+ * visibility change, not a profile edit. The update offers what describes a person — their
+ * name and phone — and nothing that decides what they may see or do.
  */
 export const createUserSchema = {
 	name: nameSchema.describe('User name'),
 	email: emailSchema.describe('User email'),
-	role: userRoleSchema.optional().describe('User role'),
+	role: z
+		.enum(['end-user', 'agent'])
+		.optional()
+		.describe(
+			'User role. Only end-user and agent can be created here — creating an admin stays a human action in the Zendesk UI'
+		),
 	verified: z.boolean().optional().describe('Whether the user is verified'),
 	phone: z.string().optional().describe('User phone number'),
 	organization_id: z.number().optional().describe('Organization ID'),
@@ -157,7 +175,6 @@ export const createUserSchema = {
 export const updateUserSchema = {
 	name: nameSchema.optional().describe('Updated user name'),
 	phone: z.string().optional().describe('Updated user phone number'),
-	organization_id: z.number().optional().describe('Updated organization ID for the user'),
 }
 
 /**

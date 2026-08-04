@@ -37,11 +37,12 @@ export const usersTools: ToolDefinition[] = [
 	),
 
 	// Withheld by `WRITE_TOOLS_ENABLED` in utils/tool-registry, like every write below that is
-	// not named there. Who a user is — their email, role and verified state — is settable at
-	// creation only; see `createUserSchema` for that argument.
+	// not named there. Who a user is — their email, role, verified state and organization — is
+	// settable at creation only, and an admin cannot be created at all; see `createUserSchema`
+	// for both arguments.
 	createTool(
 		'create_user',
-		'Create a new user',
+		'Create a new user. Only end-user and agent roles can be created — an admin account stays a human action in the Zendesk UI.',
 		createUserSchema,
 		async (client, params) => {
 			return client.createUser(params)
@@ -51,7 +52,7 @@ export const usersTools: ToolDefinition[] = [
 
 	createTool(
 		'update_user',
-		"Update an existing user's profile fields. Any field left out keeps its current value. This cannot change a user's email, role or verified state — those are set at creation and managed in the Zendesk UI.",
+		"Update an existing user's profile fields — their name or phone. This cannot change a user's email, role, verified state or organization — those are set at creation and managed in the Zendesk UI.",
 		{ id: idSchema.describe('User ID to update'), ...updateUserSchema },
 		async (client, { id, ...changes }) => {
 			requireChanges('update_user', updateUserSchema, changes)

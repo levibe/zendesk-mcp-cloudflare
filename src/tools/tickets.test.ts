@@ -9,6 +9,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { ticketsTools } from './tickets'
+import { createTicketSchema, updateTicketSchema } from '../types/zendesk'
 import type { TicketCreatePayload, TicketUpdatePayload } from '../types/zendesk'
 import type { ZendeskClient } from '../zendesk-client'
 
@@ -171,6 +172,15 @@ describe('update_ticket', () => {
 			'update_ticket needs at least one field to change'
 		)
 		expect(client.updateTicket).not.toHaveBeenCalled()
+	})
+
+	// Zendesk replaces a ticket's tag set with whatever an update sends, so the wording tells
+	// the caller to send them all — the same pin the organization tags and article labels carry.
+	it('tells a caller to send the complete tag list', () => {
+		const wording = updateTicketSchema.tags.description ?? ''
+
+		expect(wording).toMatch(/complete/i)
+		expect(wording).not.toBe(createTicketSchema.tags.description)
 	})
 })
 

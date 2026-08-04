@@ -178,7 +178,9 @@ Views take their conditions through the same shared shapes the business rules us
 
 ### Who somebody is, is set at creation
 
-The user and organization updates are deliberately narrower than their creates, on the article pattern: the sharp fields are stated once, and revision is confined to description. `email`, `role` and `verified` decide where a user's mail goes, what the account may do and whether an identity check happened — rewriting them on a live account is how an account changes hands, so `update_user` offers name, phone and organization and none of the three. `domain_names` on an organization is a membership rule rather than a property, since any user with a matching email domain joins automatically, so widening one on an existing organization stays a human action too.
+The user and organization updates are deliberately narrower than their creates, on the article pattern: the sharp fields are stated once, and revision is confined to description. `email`, `role` and `verified` decide where a user's mail goes, what the account may do and whether an identity check happened — rewriting them on a live account is how an account changes hands, so `update_user` offers name and phone and nothing else. Membership is the same rule seen from two sides: `domain_names` on an organization moves a whole email domain in automatically, and `organization_id` on a user moves one person deliberately, but both can change what shared tickets someone sees — so both are settable at creation only.
+
+Creation itself refuses one thing outright: `createUserSchema` takes `role` as `end-user` or `agent` and no more. An admin account with a caller-chosen email is a takeover in one call — the password reset goes wherever the email points — and the schema refusing it is the same pattern as the notification actions: what these tools must never build is turned away at the boundary, whether or not the tool is published.
 
 ### An article this server writes is always a draft, and its audience is set once
 
