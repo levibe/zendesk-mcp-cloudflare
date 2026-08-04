@@ -225,27 +225,27 @@ The permitted set is decided in `src/utils/tool-registry.ts`, and the tools them
 
 ### Adding New Tools
 
-To extend with additional Zendesk tools:
-
-1. Add API methods to `ZendeskClient` in `src/zendesk-client.ts`
-2. Create tool definitions in appropriate `src/tools/` file
-3. Export tools from `src/tools/index.ts`
-
-Example:
+1. Add the API method to `ZendeskClient` in `src/zendesk-client.ts`
+2. Add a `createTool` entry to the relevant file under `src/tools/`
+3. If the file is a new one, add it to `toolCategories` in `src/tools/index.ts`. Exporting it is not enough, because registration walks that object and nothing else.
 
 ```typescript
 // In src/tools/custom.ts
 export const customTools: ToolDefinition[] = [
 	createTool(
-		'my_custom_tool',
-		'Description of what this tool does',
-		{ param: z.string().describe('Parameter description') },
-		async (client: ZendeskClient, { param }) => {
-			return client.myCustomMethod(param)
+		'list_widgets',
+		'List widgets in Zendesk',
+		{ ...paginationSchema },
+		async (client, params) => {
+			return client.listWidgets(params)
 		}
 	),
 ]
 ```
+
+Do not annotate the handler's parameters. They are inferred from the schema you pass as the third argument, and writing the type out by hand creates a second source of truth that nothing reconciles.
+
+Adding a tool does not publish it. A read gets through on its `list_`, `get_` or `search_` prefix, while a write reaches no client at all until it is named in `WRITE_TOOLS_ENABLED` in `src/utils/tool-registry.ts`. CLAUDE.md carries the test a write has to pass to get in.
 
 ### Project Structure
 
