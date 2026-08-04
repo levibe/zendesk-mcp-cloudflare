@@ -33,12 +33,15 @@ type StubbedClient = ReturnType<typeof stubClient>
 const call = (tool: typeof createView, client: StubbedClient, params: Record<string, unknown>) =>
 	tool.handler(client as unknown as ZendeskClient, params)
 
-const whenUrgent = { all: [{ field: 'priority', operator: 'is', value: 'urgent' }] }
+// Conditioned on `status`, because the fixture doubles as a worked example of a payload
+// Zendesk accepts: it requires at least one `all` condition testing status, type, group_id,
+// assignee_id or requester_id.
+const whenOpen = { all: [{ field: 'status', operator: 'less_than', value: 'solved' }] }
 
 /** The smallest view the schema accepts, so a test can vary one thing about it. */
 const validView = {
-	title: 'Urgent tickets',
-	conditions: whenUrgent,
+	title: 'Open tickets',
+	conditions: whenOpen,
 	output: { columns: ['subject', 'status'] },
 	restriction: null,
 }
@@ -89,10 +92,20 @@ describe('the view create schema', () => {
 		}
 	)
 
-	it('requires conditions, through the same shared shape the triggers use', () => {
+	it('requires conditions outright', () => {
 		const { conditions: _omitted, ...withoutConditions } = validView
 
 		expect(createPayload.safeParse(withoutConditions).success).toBe(false)
+	})
+
+	// Views get a stricter condition shape than the one the business rules share. Zendesk
+	// requires `all` on a view — one condition somewhere is not enough — so a shape that
+	// accepted an any-only set would promise a payload the endpoint refuses.
+	it.each([
+		['an any-only condition set', { any: whenOpen.all }],
+		['an empty all group', { all: [] }],
+	])('refuses %s, which Zendesk would reject', (_name, conditions) => {
+		expect(createPayload.safeParse({ ...validView, conditions }).success).toBe(false)
 	})
 })
 
@@ -116,20 +129,31 @@ describe('create_view', () => {
 	})
 
 	// Zendesk's views API takes `all` and `any` at the top level of the view object, where the
-	// tools keep them nested under `conditions` so a model reuses the trigger grammar. The
-	// flattening is the one reshaping this handler does.
-	it('flattens the nested conditions into the top-level shape Zendesk takes', async () => {
+	// tools keep them nested under `conditions` so a model reuses the trigger grammar. Both
+	// arrays always travel, and a null restriction becomes omission — Zendesk documents
+	// "every agent" as the property being left out, not set to null.
+	it('flattens the conditions, sends both arrays, and omits the null restriction', async () => {
 		const client = stubClient()
 
 		await call(createView, client, validView)
 
 		expect(client.createView).toHaveBeenCalledWith({
-			title: 'Urgent tickets',
+			title: 'Open tickets',
 			output: { columns: ['subject', 'status'] },
-			restriction: null,
-			all: whenUrgent.all,
+			all: whenOpen.all,
+			any: [],
 			active: false,
 		})
+		expect(client.createView.mock.calls[0][0]).not.toHaveProperty('restriction')
+	})
+
+	it('sends a group restriction through as given', async () => {
+		const client = stubClient()
+		const restriction = { type: 'Group', ids: [7, 9] }
+
+		await call(createView, client, { ...validView, restriction })
+
+		expect(client.createView.mock.calls[0][0].restriction).toEqual(restriction)
 	})
 
 	it('answers with what Zendesk sent back, not with a wrapped response', async () => {
@@ -145,12 +169,16 @@ describe('create_view', () => {
 })
 
 describe('update_view', () => {
-	it('flattens replacement conditions the way create does', async () => {
+	// The pin that matters: Zendesk replaces each condition array independently, touching only
+	// the ones that arrive. A replacement set sent without `any` means "no any conditions", so
+	// an empty array has to travel — sending only `all` would leave conditions the caller
+	// meant to remove still matching, silently.
+	it('sends both condition arrays, so the group that was dropped is cleared', async () => {
 		const client = stubClient()
 
-		await call(updateView, client, { id: 42, conditions: whenUrgent })
+		await call(updateView, client, { id: 42, conditions: whenOpen })
 
-		expect(client.updateView).toHaveBeenCalledWith(42, { all: whenUrgent.all })
+		expect(client.updateView).toHaveBeenCalledWith(42, { all: whenOpen.all, any: [] })
 	})
 
 	it('sends a conditionless update untouched, without inventing empty groups', async () => {

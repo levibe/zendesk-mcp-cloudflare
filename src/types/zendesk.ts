@@ -550,10 +550,38 @@ export const viewOutputSchema = z.object({
  *
  * A view never widens what an agent can read: restriction decides who is offered the queue,
  * and the tickets in it are only ever ones the agent could already open.
+ *
+ * The schema takes `null` and the wire never carries it. Zendesk documents "every agent" as
+ * the restriction being omitted, not set to null, so the handler drops the key — the
+ * nullable-required field exists to make a caller state the audience, and the translation to
+ * omission is this server's job rather than the model's.
  */
 export const viewRestrictionSchema = z.object({
 	type: z.literal('Group').describe('Restrict the view to agent groups'),
 	ids: z.array(idSchema).min(1).describe('IDs of the groups that may use the view'),
+})
+
+/**
+ * The condition groups of a view, which need a stricter shape than the business rules share.
+ *
+ * Two things are true of a view and not of a trigger. Zendesk requires `all` on a view —
+ * one condition somewhere is not enough, so reusing `businessRuleConditionsSchema` would
+ * promise a payload the endpoint refuses. And on update Zendesk replaces each array
+ * independently, touching only the ones that arrive — which is why the handlers always send
+ * both whenever conditions are sent at all, so a replacement set can never half-apply and
+ * leave conditions a caller meant to remove still matching.
+ */
+export const viewConditionsSchema = z.object({
+	all: z
+		.array(businessRuleConditionSchema)
+		.min(1)
+		.describe(
+			'Conditions that must all match. Zendesk requires at least one here, including at least one testing status, type, group_id, assignee_id or requester_id. Time-based conditions have to go here'
+		),
+	any: z
+		.array(businessRuleConditionSchema)
+		.optional()
+		.describe('Conditions where one match is enough'),
 })
 
 /**
@@ -577,8 +605,8 @@ export const viewRestrictionSchema = z.object({
 export const createViewSchema = {
 	title: z.string().min(1).describe('View title, shown to agents as the name of the queue'),
 	description: descriptionSchema.describe('View description'),
-	conditions: businessRuleConditionsSchema.describe(
-		'Which tickets the view lists, as the same all/any condition groups triggers use'
+	conditions: viewConditionsSchema.describe(
+		'Which tickets the view lists, as the same all/any condition grammar triggers use'
 	),
 	output: viewOutputSchema.describe('Which columns the view shows and how rows group and sort'),
 	restriction: viewRestrictionSchema
@@ -590,11 +618,11 @@ export const createViewSchema = {
 
 export const updateViewSchema = {
 	title: z.string().min(1).optional().describe('Updated view title'),
-	description: descriptionSchema,
-	conditions: businessRuleConditionsSchema
+	description: descriptionSchema.describe('Updated view description'),
+	conditions: viewConditionsSchema
 		.optional()
 		.describe(
-			'Replacement conditions, as the same all/any groups triggers use. Send the complete set: what arrives replaces every existing condition rather than adding to them'
+			'Replacement conditions. Send the complete set: what arrives replaces every existing condition rather than adding to them'
 		),
 	output: viewOutputSchema
 		.optional()
@@ -602,15 +630,24 @@ export const updateViewSchema = {
 }
 
 /**
- * The wire shape: `conditions` flattened into top-level `all`/`any`, and creation pinned
- * dormant. `active: false` is held in the type for the reason the business rule payloads hold
- * it — the schemas never accept the field, so it can only come from the handler, and stating
- * it here makes forgetting it a compile error rather than a live queue.
+ * The wire shape, which differs from the schemas in three deliberate ways. `conditions` is
+ * flattened into the top-level `all`/`any` Zendesk's views API takes, with both arrays always
+ * present so a replacement cannot half-apply — see `viewConditionsSchema`. `restriction` is
+ * optional and never null, because "every agent" travels as omission — see
+ * `viewRestrictionSchema`. And creation is pinned dormant: `active: false` is held in the
+ * type for the reason the business rule payloads hold it — the schemas never accept the
+ * field, so it can only come from the handler, and stating it here makes forgetting it a
+ * compile error rather than a live queue.
  */
-type ViewConditionGroups = z.infer<typeof businessRuleConditionsSchema>
+type ViewCondition = z.infer<typeof businessRuleConditionSchema>
+type ViewConditionGroups = { all: ViewCondition[]; any: ViewCondition[] }
+type ViewRestriction = z.infer<typeof viewRestrictionSchema>
 
-export type ViewCreatePayload = Omit<InferParams<typeof createViewSchema>, 'conditions'> &
-	ViewConditionGroups & { active: false }
+export type ViewCreatePayload = Omit<
+	InferParams<typeof createViewSchema>,
+	'conditions' | 'restriction'
+> &
+	ViewConditionGroups & { restriction?: ViewRestriction; active: false }
 export type ViewUpdatePayload = Omit<InferParams<typeof updateViewSchema>, 'conditions'> &
 	Partial<ViewConditionGroups>
 

@@ -11,10 +11,29 @@
  * creation and cannot be changed by an update; see `createViewSchema` for both arguments.
  */
 
+import { z } from 'zod'
 import type { ToolDefinition } from '../types/zendesk'
-import { paginationSchema, idSchema, createViewSchema, updateViewSchema } from '../types/zendesk'
+import {
+	paginationSchema,
+	idSchema,
+	createViewSchema,
+	updateViewSchema,
+	viewConditionsSchema,
+} from '../types/zendesk'
 import { createTool } from '../utils/tool-registry'
 import { requireChanges } from '../utils/require-changes'
+
+/**
+ * The nested condition groups, flattened to the top-level `all`/`any` Zendesk's views API
+ * takes — with both arrays always present. Zendesk replaces each array independently on
+ * update, touching only the ones that arrive, so sending only what the caller mentioned
+ * would leave conditions they meant to remove still matching. Sending both is what makes
+ * "what arrives replaces every existing condition" true.
+ */
+const replaceConditions = (conditions: z.infer<typeof viewConditionsSchema>) => ({
+	all: conditions.all,
+	any: conditions.any ?? [],
+})
 
 export const viewsTools: ToolDefinition[] = [
 	createTool('list_views', 'List views in Zendesk', paginationSchema, async (client, params) => {
@@ -30,14 +49,19 @@ export const viewsTools: ToolDefinition[] = [
 		}
 	),
 
-	// Both handlers flatten `conditions` into the top-level `all`/`any` Zendesk's views API
-	// takes, so a model keeps the one nested condition shape it learned from the triggers.
+	// A null restriction means every agent, and Zendesk documents that as the property being
+	// omitted — so the stated-null the schema requires is translated to omission here.
 	createTool(
 		'create_view',
 		'Create a new view — a saved, filtered ticket list agents work from. It is created inactive and is offered to nobody until someone activates it in the Zendesk UI.',
 		createViewSchema,
-		async (client, { conditions, ...rest }) => {
-			return client.createView({ ...rest, ...conditions, active: false })
+		async (client, { conditions, restriction, ...rest }) => {
+			return client.createView({
+				...rest,
+				...replaceConditions(conditions),
+				...(restriction !== null && { restriction }),
+				active: false,
+			})
 		},
 		'View created successfully, and is inactive. Activate it in the Zendesk UI once you have read it back.'
 	),
@@ -50,7 +74,10 @@ export const viewsTools: ToolDefinition[] = [
 			requireChanges('update_view', updateViewSchema, changes)
 
 			const { conditions, ...rest } = changes
-			return client.updateView(id, conditions ? { ...rest, ...conditions } : rest)
+			return client.updateView(
+				id,
+				conditions !== undefined ? { ...rest, ...replaceConditions(conditions) } : rest
+			)
 		},
 		'View updated successfully!'
 	),
