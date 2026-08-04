@@ -4,36 +4,7 @@ This is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/introdu
 
 The server allows MCP clients (like Claude Desktop) to interact securely with Zendesk APIs through authenticated remote connections. It reads across tickets, users, organizations, the Help Center and more, and writes only macros.
 
-## Features
-
-### Zendesk API Coverage
-
-The server reads widely and writes only macros. Reading covers:
-
-- **Tickets**: List, fetch and search support tickets
-- **Users**: List, fetch and search users
-- **Organizations**: List, fetch and search organizations
-- **Groups**: List and fetch agent groups
-- **Macros**: List and fetch ticket macros
-- **Views**: List and fetch ticket views
-- **Triggers**: List and fetch triggers
-- **Automations**: List and fetch automations
-- **Search**: Search across all Zendesk data
-- **Help Center**: Browse and search the knowledge base: articles, sections and categories
-- **Support**: General configuration information
-- **Talk**: Access call center statistics
-- **Chat**: Read chat conversations
-
-Writing is limited to creating and updating macros. [Available Tools](#available-tools) explains why, and what happens if you ask for anything else.
-
-### Technical Features
-
-- **Google OAuth Authentication**: Secure user authentication flow
-- **Remote MCP Protocol**: Streamable HTTP, stateless, so each request stands alone with no session to establish or keep alive
-- **Cloudflare Workers**: Serverless deployment with global edge distribution
-- **Type Safety**: Full TypeScript implementation with Zod validation
-- **Error Handling**: Comprehensive error handling with user-friendly messages
-- **Modular Architecture**: Easy to extend with additional tools
+[Available Tools](#available-tools) is the authority on what it will and will not do.
 
 ## Getting Started
 
@@ -150,7 +121,7 @@ Either way the connector follows the account rather than the machine, so it appe
 
 `/mcp` is the only endpoint. `/sse` served the superseded HTTP+SSE transport, which MCP revision 2026-07-28 deprecates outright, and it has been removed, so a client configured against it now gets nothing. Clients too old to speak the current revision are still served at `/mcp`, so on transport grounds this only strands one that can speak HTTP+SSE and nothing else.
 
-One other kind of client is turned away, for an unrelated reason. The server validates the `Origin` header whenever a request carries one. By default it accepts localhost, and also the worker's own hostname when you are on a `workers.dev` address, so a page served from the worker itself is fine while a custom domain is left allowing localhost alone. Any other origin gets a 403. Nothing described on this page is affected, since a connector is fetched by Anthropic's servers and `mcp-remote` runs under Node, and neither sends an `Origin` at all. It is simply the first thing to check if a browser-based client fails with a message about origins rather than about transports.
+A browser-based client can be turned away for an unrelated reason. The server validates the `Origin` header whenever a request carries one, accepting localhost and, on a `workers.dev` address, the worker's own hostname. A custom domain is therefore left allowing localhost alone, and any other origin gets a 403. Nothing on this page is affected, since a connector is fetched by Anthropic's servers and `mcp-remote` runs under Node, so neither sends an `Origin` at all. It is only worth knowing if a browser-based client fails with a message about origins rather than about transports.
 
 Anthropic's infrastructure makes this connection rather than the user's machine, so the worker has to be reachable over the public internet, which a deployed worker already is. That is also the property that makes this route viable for people who will never open a terminal: nothing runs locally, so there is nothing local to go wrong. `HOSTED_DOMAIN` still governs who may sign in, so a connector does not widen access.
 
@@ -203,7 +174,7 @@ Authenticate through the browser flow when prompted, then ask Claude to:
 
 ## Connecting ChatGPT
 
-ChatGPT speaks MCP as well, so this server works there, but only through Developer Mode, and it is worth understanding why that is the only route before you start.
+ChatGPT speaks MCP as well, so this server works there, but only through Developer Mode.
 
 ChatGPT consumes an MCP server in two quite different ways. An ordinary connector, the kind behind deep research and company knowledge, never calls arbitrary tools: it calls exactly two, named `search` and `fetch`, returning a shape OpenAI specifies. This server publishes neither, so ChatGPT will refuse to add it that way. Developer Mode is the other route, and there the whole published tool list is callable, which is more than the two-tool connector would ever have given you.
 
@@ -287,27 +258,3 @@ src/
 ├── types/                # TypeScript types
 └── utils/                # Utilities and helpers
 ```
-
-## Architecture
-
-This server demonstrates a clean architecture for remote MCP servers:
-
-- **OAuth Provider**: Handles secure authentication with Google
-- **API Client**: Cloudflare Workers-compatible HTTP client
-- **Tool Registry**: Modular tool organization and registration
-- **Error Handling**: Functional approach with consistent error responses
-- **Type Safety**: Full TypeScript with runtime validation
-
-This pattern can be adapted for other APIs by:
-
-1. Replacing `ZendeskClient` with your API client
-2. Creating new tool definitions in `src/tools/`
-3. Updating environment variables and configuration
-
-## Support
-
-For issues and questions:
-
-- Check the [MCP documentation](https://modelcontextprotocol.io/)
-- Review [Cloudflare Workers docs](https://developers.cloudflare.com/workers/)
-- Consult [Zendesk API documentation](https://developer.zendesk.com/api-reference/)
