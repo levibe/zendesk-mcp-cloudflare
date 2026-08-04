@@ -241,15 +241,3 @@ export const customTools: ToolDefinition[] = [
 Do not annotate the handler's parameters. They are inferred from the schema you pass as the third argument, and writing the type out by hand creates a second source of truth that nothing reconciles.
 
 Adding a tool does not publish it. A read gets through on its `list_`, `get_` or `search_` prefix, while a write reaches no client at all until it is named in `WRITE_TOOLS_ENABLED` in `src/utils/tool-registry.ts`. CLAUDE.md carries the test a write has to pass to get in.
-
-### Project Structure
-
-```
-src/
-├── index.ts              # Main entry point
-├── google-handler.ts     # OAuth handler
-├── zendesk-client.ts     # Zendesk API client
-├── tools/                # MCP tool definitions
-├── types/                # TypeScript types
-└── utils/                # Utilities and helpers
-```
