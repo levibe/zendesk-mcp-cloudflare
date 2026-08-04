@@ -170,6 +170,20 @@ The trigger and automation writes carry a second guardrail that has nothing to d
 
 The notification actions — everything named `notification_*`, plus `tweet_requester` and `satisfaction_score` — are refused by `businessRuleActionSchema`. That one is a denylist, which is the opposite shape from the allowlists above, and the difference is worth keeping rather than tidying. Tool names are ours and finite, so an allowlist works there. Action fields are Zendesk's and are not: a custom field action is `custom_fields_12345`, so any allowlist wide enough to accept one accepts anything. The prefix does the work, and a notification action Zendesk names some other way would get through — which is precisely why it is not the only control.
 
+### An article this server writes is always a draft, and its audience is set once
+
+The Help Center writes are shaped the same way and for a different reason. An article is the only thing these tools build that a customer reads rather than an agent, and Zendesk supplies the staging state natively: a draft is invisible to end users. So `createArticleSchema` does not accept `draft`, `create_article` sends `draft: true` itself, and `ArticleCreatePayload` holds that in its type the way the business rule payloads hold `active: false`.
+
+An update is two endpoints rather than one, because Zendesk splits the article itself that way. `PUT /help_center/articles/{id}` applies metadata — labels, promoted, position, comments — and silently ignores `title` and `body`, answering 200 with the article unchanged; content only moves through `PUT /help_center/articles/{id}/translations/{locale}`. So `update_article` routes content through `updateArticleTranslation` and everything else through `updateArticle`, and aims the translation write at the article's source locale, which it reads from the article per call rather than asking the caller. A mixed update is two requests, content first — the locale lookup is the step that can fail, and failing there leaves nothing half-applied.
+
+Publishing is blocked twice over, which is worth knowing before someone tries to add it as a convenience. The translations endpoint is also the one that publishes — `{ translation: { draft: false } }` — so `updateArticleTranslation` is the one method a publish could slip through, and its payload type is what refuses it: `ArticleTranslationUpdatePayload` declares `draft?: never`, so a handler passing the flag stops compiling, the way the create payloads hold `draft: true` and `active: false`. Zendesk marking `draft` read-only on the article endpoint closes the other path.
+
+`update_article` also declines to change who may read an article. `permission_group_id`, `user_segment_id` and `locale` are settable at creation and absent from the update shape, which is why `articleContentSchema` exists as a separate shape rather than the update being a `.partial()` of the whole create. Revising what an article says is an edit; widening who can see it is the change nobody notices until a customer has read something internal. Both stay human actions in the Zendesk UI.
+
+`user_segment_id` is required and nullable rather than optional, and that is the distinction doing the work: `null` means everyone, and a caller has to have said so. An omitted visibility field is how an article ends up more visible than anyone intended.
+
+The body is HTML and deliberately unchecked. A check written here would be a second sanitizer, worse than Zendesk's own and trusted more for sitting closer to the model; what protects the reader is the draft.
+
 ## Testing
 
 ### Unit Tests

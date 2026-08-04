@@ -1,7 +1,14 @@
 import { z } from 'zod'
-import type { ToolDefinition } from '../types/zendesk'
-import { paginationSchema, sortingSchema, idSchema } from '../types/zendesk'
+import type { ArticleTranslationUpdatePayload, ToolDefinition } from '../types/zendesk'
+import {
+	paginationSchema,
+	sortingSchema,
+	idSchema,
+	createArticleSchema,
+	updateArticleSchema,
+} from '../types/zendesk'
 import { createTool } from '../utils/tool-registry'
+import { requireChanges } from '../utils/require-changes'
 import { executeSearchWithStandardizedResponse } from '../utils/search-response'
 import { isRecord } from '../utils/narrow'
 
@@ -229,6 +236,25 @@ const TRUNCATION_NOTE =
 	'for a smaller slice — pass category_id to walk a single category, or leave include_articles ' +
 	'unset so the walk does not spend its requests on articles. The third is not: a narrower ' +
 	'walk reads the same page and stops in the same place, so retry rather than narrow.'
+
+/**
+ * Which translation `update_article` edits, read off the article rather than asked of the
+ * caller. The update shape deliberately takes no locale — which language an article is in is
+ * set once, at creation — so a content edit aims at the translation the article was written
+ * in. The throw fires before anything has been written: the lookup is the first step of a
+ * content change, so a refusal here leaves the article exactly as it was.
+ */
+const sourceLocaleOf = (articleResponse: unknown): string => {
+	const article = isRecord(articleResponse) ? articleResponse.article : undefined
+
+	if (isRecord(article) && typeof article.source_locale === 'string') {
+		return article.source_locale
+	}
+
+	throw new Error(
+		"update_article could not read the article's source locale from Zendesk's response, so nothing was changed."
+	)
+}
 
 export const helpCenterTools: ToolDefinition[] = [
 	createTool(
@@ -465,5 +491,54 @@ export const helpCenterTools: ToolDefinition[] = [
 			const { section_id, ...otherParams } = params
 			return client.listArticlesBySection(section_id, otherParams)
 		}
+	),
+
+	// The two writes, which `WRITE_TOOLS_ENABLED` in utils/tool-registry deliberately does not
+	// name, so no client is offered them yet. An article is the only thing these tools can build
+	// that a customer reads directly rather than an agent, and the draft flag is what makes that
+	// safe: a draft is invisible to end users, `create_article` forces one, and neither tool can
+	// publish. See `createArticleSchema` for the rest of that argument.
+	createTool(
+		'create_article',
+		'Create a Help Center article inside a section. It is created as a draft, so no customer can see it until a human publishes it from the Zendesk UI.',
+		{
+			section_id: idSchema.describe('ID of the section to create the article in'),
+			...createArticleSchema,
+		},
+		async (client, { section_id, ...article }) => {
+			return client.createArticle({ ...article, draft: true }, section_id)
+		},
+		'Article created successfully, as a draft. No customer can see it until someone publishes it in the Zendesk UI.'
+	),
+
+	createTool(
+		'update_article',
+		"Update a Help Center article's content. Title and body edits apply to the article's source-language translation. Any field left out keeps its current value. This cannot publish a draft, and cannot change who is allowed to see the article.",
+		{ id: idSchema.describe('Article ID to update'), ...updateArticleSchema },
+		async (client, { id, ...changes }) => {
+			requireChanges('update_article', updateArticleSchema, changes)
+
+			// Zendesk keeps what an article says on its translation and where it sits on the
+			// article record, and the article endpoint silently ignores content fields rather
+			// than refusing them — so the routing here is correctness, not taste. Content goes
+			// first because its locale lookup is the step that can fail, and failing before any
+			// write leaves nothing half-applied. A mixed update that fails on its second request
+			// leaves the first standing; re-sending the same update converges.
+			const { title, body, ...metadata } = changes
+			const content: ArticleTranslationUpdatePayload = {}
+			if (title !== undefined) content.title = title
+			if (body !== undefined) content.body = body
+
+			let result: unknown
+			if (Object.keys(content).length > 0) {
+				const locale = sourceLocaleOf(await client.getArticle(id))
+				result = await client.updateArticleTranslation(id, locale, content)
+			}
+			if (Object.keys(metadata).length > 0) {
+				result = await client.updateArticle(id, metadata)
+			}
+			return result
+		},
+		'Article updated successfully!'
 	),
 ]
