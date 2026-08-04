@@ -392,6 +392,38 @@ export type AutomationCreatePayload = InferParams<typeof createAutomationSchema>
 export type AutomationUpdatePayload = InferParams<typeof updateAutomationSchema>
 
 /**
+ * What an article says, which Zendesk keeps on the article's translation rather than on the
+ * article record. `PUT /help_center/articles/{id}` silently ignores both of these fields —
+ * it answers 200 with the article unchanged — so an update can only move them through the
+ * translations endpoint, and `update_article` routes on exactly this split. Creation is the
+ * one place they travel with everything else, because creating an article creates its first
+ * translation in the same request.
+ */
+const articleTranslationSchema = {
+	title: z.string().min(1).describe('Article title'),
+	body: z.string().optional().describe('Article body, as HTML'),
+}
+
+/**
+ * Where an article sits and how it is curated — the fields the article record itself holds,
+ * which are the whole of what `PUT /help_center/articles/{id}` actually applies.
+ */
+const articleMetadataSchema = {
+	label_names: z.array(z.string()).optional().describe('Labels applied to the article'),
+	promoted: z.boolean().optional().describe('Whether the article is promoted in its section'),
+	position: z
+		.number()
+		.int()
+		.min(0)
+		.optional()
+		.describe('Order this article appears in within its section'),
+	comments_disabled: z
+		.boolean()
+		.optional()
+		.describe('Whether end users are prevented from commenting on the article'),
+}
+
+/**
  * What an article says and where it sits, as opposed to who is allowed to read it.
  *
  * The split is the whole design of the two article writes. Everything here is editable by
@@ -408,20 +440,8 @@ export type AutomationUpdatePayload = InferParams<typeof updateAutomationSchema>
  * the article is created as a draft and no customer sees it until a human has read it.
  */
 const articleContentSchema = {
-	title: z.string().min(1).describe('Article title'),
-	body: z.string().optional().describe('Article body, as HTML'),
-	label_names: z.array(z.string()).optional().describe('Labels applied to the article'),
-	promoted: z.boolean().optional().describe('Whether the article is promoted in its section'),
-	position: z
-		.number()
-		.int()
-		.min(0)
-		.optional()
-		.describe('Order this article appears in within its section'),
-	comments_disabled: z
-		.boolean()
-		.optional()
-		.describe('Whether end users are prevented from commenting on the article'),
+	...articleTranslationSchema,
+	...articleMetadataSchema,
 }
 
 /**
@@ -470,11 +490,12 @@ export const createArticleSchema = {
 /**
  * What an existing article may have changed: what it says and where it sits, and nothing else.
  *
- * `draft` is not here, and could not be even if we wanted it. Zendesk marks the field
- * read-only on update and publishes an article through the translation instead —
- * `PUT /help_center/articles/{id}/translations/{locale}` with `{ translation: { draft: false } }`
- * — which is an endpoint this client has no method for. So publishing stays a human action by
- * two separate mechanisms, and adding a translation method would quietly undo one of them.
+ * `draft` is not here, and the shape is only the first of two refusals. Zendesk marks the
+ * field read-only on the article endpoint and publishes an article through the translation
+ * instead — `PUT /help_center/articles/{id}/translations/{locale}` with
+ * `{ translation: { draft: false } }` — and the method that reaches that endpoint takes
+ * `ArticleTranslationUpdatePayload`, whose `draft?: never` makes handing it the flag a compile
+ * error. So publishing stays a human action on both endpoints an update can touch.
  *
  * `label_names` is worded as the complete list rather than the labels to add. Zendesk does not
  * document which it does, and the wording is chosen to be correct either way: a caller sending
@@ -501,7 +522,23 @@ export const updateArticleSchema = {
  * stops compiling instead of quietly publishing to a customer-facing page.
  */
 export type ArticleCreatePayload = InferParams<typeof createArticleSchema> & { draft: true }
-export type ArticleUpdatePayload = InferParams<typeof updateArticleSchema>
+
+/**
+ * The metadata half of an update — the fields `PUT /help_center/articles/{id}` actually
+ * applies. Content is `ArticleTranslationUpdatePayload` and travels to the translations
+ * endpoint; sending it here would be silently ignored, not refused.
+ */
+export type ArticleUpdatePayload = Partial<InferParams<typeof articleMetadataSchema>>
+
+/**
+ * The translations endpoint is also the one that publishes — `{ translation: { draft: false } }`
+ * is what takes an article live — so the method that reaches it is the one place a publish
+ * could slip in. `draft?: never` is what stops that: a handler cannot hand the method the flag
+ * and still compile, the way the create payloads hold `draft: true` and `active: false`.
+ */
+export type ArticleTranslationUpdatePayload = Partial<
+	InferParams<typeof articleTranslationSchema>
+> & { draft?: never }
 
 /**
  * What `support_info` answers with.

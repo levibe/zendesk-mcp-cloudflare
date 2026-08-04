@@ -16,7 +16,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import { helpCenterTools } from './help-center'
 import { createArticleSchema, updateArticleSchema } from '../types/zendesk'
-import type { ArticleCreatePayload, ArticleUpdatePayload } from '../types/zendesk'
+import type {
+	ArticleCreatePayload,
+	ArticleTranslationUpdatePayload,
+	ArticleUpdatePayload,
+} from '../types/zendesk'
 import type { ZendeskClient } from '../zendesk-client'
 
 const hierarchyTool = helpCenterTools.find((tool) => tool.name === 'get_help_center_hierarchy')!
@@ -588,10 +592,14 @@ const updateArticle = helpCenterTools.find((tool) => tool.name === 'update_artic
 const createArticlePayload = z.object({ section_id: z.number(), ...createArticleSchema })
 const updateArticlePayload = z.object(updateArticleSchema)
 
-/** Stands in for the two client methods, under the signatures they actually declare. */
-const stubArticleClient = (article: unknown = { article: { id: 1 } }) => ({
+/** Stands in for the client methods the article tools reach, under their declared signatures. */
+const stubArticleClient = (article: unknown = { article: { id: 1, source_locale: 'en-us' } }) => ({
+	getArticle: vi.fn(async (_id: number) => article),
 	createArticle: vi.fn(async (_data: ArticleCreatePayload, _sectionId: number) => article),
 	updateArticle: vi.fn(async (_id: number, _data: ArticleUpdatePayload) => article),
+	updateArticleTranslation: vi.fn(
+		async (_id: number, _locale: string, _data: ArticleTranslationUpdatePayload) => article
+	),
 })
 
 type StubbedArticleClient = ReturnType<typeof stubArticleClient>
@@ -722,12 +730,54 @@ describe('create_article', () => {
 })
 
 describe('update_article', () => {
-	it('addresses the article by id and sends everything else as the payload', async () => {
+	// The article endpoint applies metadata only and silently ignores `title` and `body` — it
+	// answers 200 with the article unchanged — so content routed there would read back as a
+	// success and change nothing. The routing is the whole point of these three tests.
+	it('sends a content change to the translation endpoint, aimed at the source locale', async () => {
 		const client = stubArticleClient()
 
 		await callArticleTool(updateArticle, client, { id: 42, title: 'Renamed' })
 
-		expect(client.updateArticle).toHaveBeenCalledWith(42, { title: 'Renamed' })
+		expect(client.updateArticleTranslation).toHaveBeenCalledWith(42, 'en-us', {
+			title: 'Renamed',
+		})
+		expect(client.updateArticle).not.toHaveBeenCalled()
+	})
+
+	it('sends a metadata change to the article endpoint without looking up the locale', async () => {
+		const client = stubArticleClient()
+
+		await callArticleTool(updateArticle, client, { id: 42, promoted: true })
+
+		expect(client.updateArticle).toHaveBeenCalledWith(42, { promoted: true })
+		expect(client.getArticle).not.toHaveBeenCalled()
+		expect(client.updateArticleTranslation).not.toHaveBeenCalled()
+	})
+
+	it('splits a mixed update across both endpoints, content first', async () => {
+		const client = stubArticleClient()
+
+		await callArticleTool(updateArticle, client, { id: 42, title: 'Renamed', promoted: true })
+
+		expect(client.updateArticleTranslation).toHaveBeenCalledWith(42, 'en-us', {
+			title: 'Renamed',
+		})
+		expect(client.updateArticle).toHaveBeenCalledWith(42, { promoted: true })
+		expect(client.updateArticleTranslation.mock.invocationCallOrder[0]).toBeLessThan(
+			client.updateArticle.mock.invocationCallOrder[0]
+		)
+	})
+
+	// The locale lookup is the one step of a content change that can fail before anything is
+	// written, which is why content goes first: a refusal here leaves the article as it was.
+	it('refuses a content change when the source locale cannot be read, before writing anything', async () => {
+		const client = stubArticleClient({ article: { id: 42 } })
+
+		await expect(
+			callArticleTool(updateArticle, client, { id: 42, title: 'Renamed' })
+		).rejects.toThrow('source locale')
+		expect(client.updateArticleTranslation).not.toHaveBeenCalled()
+		expect(client.updateArticle).not.toHaveBeenCalled()
 	})
 
 	// Zendesk accepts an update with nothing in it and changes nothing, which reads back as a
@@ -739,6 +789,7 @@ describe('update_article', () => {
 			'update_article needs at least one field to change'
 		)
 		expect(client.updateArticle).not.toHaveBeenCalled()
+		expect(client.updateArticleTranslation).not.toHaveBeenCalled()
 	})
 
 	it('carries the confirmation registration heads the article with', () => {

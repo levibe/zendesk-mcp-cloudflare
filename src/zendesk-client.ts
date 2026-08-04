@@ -1,5 +1,6 @@
 import type {
 	ArticleCreatePayload,
+	ArticleTranslationUpdatePayload,
 	ArticleUpdatePayload,
 	AutomationCreatePayload,
 	AutomationUpdatePayload,
@@ -893,6 +894,22 @@ export class ZendeskClient {
 	async updateArticle(id: number, data: ArticleUpdatePayload) {
 		this.validateId(id)
 		return this.send('PUT', `/help_center/articles/${id}.json`, { article: data })
+	}
+
+	// Where an article's content actually changes: the article endpoint above applies metadata
+	// only and silently ignores `title` and `body`. This is also the endpoint that publishes,
+	// which is why the payload type refuses `draft` — see ArticleTranslationUpdatePayload.
+	async updateArticleTranslation(
+		id: number,
+		locale: string,
+		data: ArticleTranslationUpdatePayload
+	) {
+		this.validateId(id)
+		return this.send(
+			'PUT',
+			`/help_center/articles/${id}/translations/${encodeURIComponent(locale)}.json`,
+			{ translation: data }
+		)
 	}
 
 	async deleteArticle(id: number) {
