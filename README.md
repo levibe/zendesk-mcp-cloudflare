@@ -1,10 +1,29 @@
 # Zendesk MCP Server with Google OAuth
 
-This is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/introduction) server that provides comprehensive Zendesk API integration with Google OAuth authentication, deployed on Cloudflare Workers.
+This is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/introduction) server that gives MCP clients authenticated access to the Zendesk API, deployed on Cloudflare Workers and signed in through Google.
 
-The server allows MCP clients (like Claude Desktop) to interact securely with Zendesk APIs through authenticated remote connections. It reads across tickets, users, organizations, the Help Center and more, and writes only macros.
+## What it does
 
-[Available Tools](#available-tools) is the authority on what it will and will not do.
+It reads widely across Zendesk and writes almost nothing.
+
+- **Tickets, users and organizations**: list, fetch and search
+- **Groups, macros, views, triggers and automations**: list and fetch
+- **Help Center**: browse and search articles, sections and categories
+- **Search**: one query across everything above
+- **Talk and Chat**: call statistics and chat conversations
+- **Support**: general configuration information
+
+Anything named `list_*`, `get_*` or `search_*` is available, along with `search` and `support_info`.
+
+**Writing is limited to `create_macro` and `update_macro`.** A macro is a shortcut an agent applies to a ticket by hand, so creating one changes nothing on its own, which is why these two are permitted where nothing else is.
+
+**Everything else is refused.** Creating, updating and deleting a ticket, and creating a user, an organization or a group, are all written and working in the code but never offered to a client, so asking for them will not work. Nothing else writes at all. Deleting a macro, for instance, was never built as a tool. The permitted set is decided in `src/utils/tool-registry.ts`, and the server logs what it withheld each time it starts.
+
+## How it works
+
+- **Google OAuth**: signing in goes through Google, and `HOSTED_DOMAIN` can restrict it to a single domain
+- **Streamable HTTP, stateless**: each request stands alone, with no session to establish or keep alive
+- **Cloudflare Workers**: serverless, with no Durable Object and nothing held between requests
 
 ## Getting Started
 
@@ -208,18 +227,6 @@ Write actions ask for confirmation before they run. You can tell ChatGPT to reme
 Deep research and company knowledge will not use this server at all, for the reason at the top of this section: they only ever reach for `search` and `fetch`.
 
 OpenAI is direct that Developer Mode is for people who understand what they are switching on, and names three risks: prompt injection, a model getting a write wrong, and a malicious server stealing data. The first two apply here as much as anywhere. The third is a question about who runs the server, which in this case is you. What limits the blast radius of the other two is the same thing that limits it for every other client. Deleting a ticket, creating a user and the rest are never offered to anybody, so full access in Developer Mode is full access to a deliberately short list.
-
-## Available Tools
-
-The server reads widely and writes almost nothing.
-
-**Reading** covers tickets, users, organizations, groups, macros, views, triggers, automations, Talk statistics, Chat conversations and the whole Help Center. You can list them, fetch one by ID, and search. Anything named `list_*`, `get_*` or `search_*` is available, along with `search` and `support_info`.
-
-**Writing** is limited to `create_macro` and `update_macro`. A macro is a shortcut an agent applies to a ticket by hand, so creating one changes nothing on its own, which is why these two are permitted where nothing else is.
-
-**Everything else is refused.** Creating, updating and deleting a ticket, and creating a user, an organization or a group, are all written and working in the code but never offered to a client, so asking for them will not work. Nothing else writes at all. Deleting a macro, for instance, was never built as a tool. The server logs what it withheld each time it starts.
-
-The permitted set is decided in `src/utils/tool-registry.ts`, and the tools themselves are defined under `src/tools/`. See CLAUDE.md for how a tool gets permitted.
 
 ## Development
 
