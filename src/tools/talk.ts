@@ -1,7 +1,6 @@
-import type { ToolDefinition } from '../types/zendesk'
-import { createTool } from '../utils/tool-registry'
+import { createTool, type ZendeskToolDefinition } from './create-tool'
 
-export const talkTools: ToolDefinition[] = [
+export const talkTools: ZendeskToolDefinition[] = [
 	createTool('get_talk_stats', 'read', 'Get Zendesk Talk statistics', {}, async (client) => {
 		return client.getTalkStats()
 	}),

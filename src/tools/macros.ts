@@ -5,12 +5,11 @@
  * `stage` is its honest level, where a trigger is only inert because its schema forces it.
  */
 
-import type { ToolDefinition } from '../types/zendesk'
 import { paginationSchema, idSchema, createMacroSchema, updateMacroSchema } from '../types/zendesk'
-import { createTool } from '../utils/tool-registry'
+import { createTool, type ZendeskToolDefinition } from './create-tool'
 import { requireChanges } from '../utils/require-changes'
 
-export const macrosTools: ToolDefinition[] = [
+export const macrosTools: ZendeskToolDefinition[] = [
 	createTool(
 		'list_macros',
 		'read',

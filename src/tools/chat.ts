@@ -1,7 +1,6 @@
-import type { ToolDefinition } from '../types/zendesk'
-import { createTool } from '../utils/tool-registry'
+import { createTool, type ZendeskToolDefinition } from './create-tool'
 
-export const chatTools: ToolDefinition[] = [
+export const chatTools: ZendeskToolDefinition[] = [
 	/**
 	 * No pagination arguments, deliberately, and this is the tool to read before adding any.
 	 *

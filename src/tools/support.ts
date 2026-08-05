@@ -1,8 +1,7 @@
-import type { ToolDefinition } from '../types/zendesk'
-import { createTool } from '../utils/tool-registry'
+import { createTool, type ZendeskToolDefinition } from './create-tool'
 import { summarizeCurrentUser } from '../utils/support-response'
 
-export const supportTools: ToolDefinition[] = [
+export const supportTools: ZendeskToolDefinition[] = [
 	/**
 	 * This asks Zendesk rather than describing it. The description promises information about the
 	 * configuration, which makes it the tool anyone reaches for to check the server is wired up

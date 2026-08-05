@@ -1,4 +1,4 @@
-import type { McpToolResponse } from '../types/zendesk'
+import type { McpToolResponse } from '../types/mcp'
 
 /**
  * `registerTools` is the only caller, and applies this to every handler exactly once. Do not

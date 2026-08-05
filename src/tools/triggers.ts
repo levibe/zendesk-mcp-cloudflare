@@ -10,17 +10,16 @@
  * rewriting an active trigger's conditions changes what fires on live tickets immediately.
  */
 
-import type { ToolDefinition } from '../types/zendesk'
 import {
 	paginationSchema,
 	idSchema,
 	createTriggerSchema,
 	updateTriggerSchema,
 } from '../types/zendesk'
-import { createTool } from '../utils/tool-registry'
+import { createTool, type ZendeskToolDefinition } from './create-tool'
 import { requireChanges } from '../utils/require-changes'
 
-export const triggersTools: ToolDefinition[] = [
+export const triggersTools: ZendeskToolDefinition[] = [
 	createTool(
 		'list_triggers',
 		'read',

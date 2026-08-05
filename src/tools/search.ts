@@ -1,10 +1,9 @@
 import { z } from 'zod'
-import type { ToolDefinition } from '../types/zendesk'
 import { paginationSchema, sortingSchema } from '../types/zendesk'
-import { createTool } from '../utils/tool-registry'
+import { createTool, type ZendeskToolDefinition } from './create-tool'
 import { executeSearchWithStandardizedResponse } from '../utils/search-response'
 
-export const searchTools: ToolDefinition[] = [
+export const searchTools: ZendeskToolDefinition[] = [
 	createTool(
 		'search',
 		'read',

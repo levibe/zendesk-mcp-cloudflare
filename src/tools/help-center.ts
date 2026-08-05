@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { ArticleTranslationUpdatePayload, ToolDefinition } from '../types/zendesk'
+import type { ArticleTranslationUpdatePayload } from '../types/zendesk'
 import {
 	paginationSchema,
 	sortingSchema,
@@ -7,7 +7,7 @@ import {
 	createArticleSchema,
 	updateArticleSchema,
 } from '../types/zendesk'
-import { createTool } from '../utils/tool-registry'
+import { createTool, type ZendeskToolDefinition } from './create-tool'
 import { requireChanges } from '../utils/require-changes'
 import { executeSearchWithStandardizedResponse } from '../utils/search-response'
 import { isRecord } from '../utils/narrow'
@@ -256,7 +256,7 @@ const sourceLocaleOf = (articleResponse: unknown): string => {
 	)
 }
 
-export const helpCenterTools: ToolDefinition[] = [
+export const helpCenterTools: ZendeskToolDefinition[] = [
 	createTool(
 		'list_articles',
 		'read',
