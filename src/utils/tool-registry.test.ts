@@ -6,26 +6,26 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MockInstance } from 'vitest'
+import { parse } from 'jsonc-parser'
 import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/server'
 import type { ZendeskClient } from '../zendesk-client'
 import type { McpToolResponse, ToolDefinition } from '../types/zendesk'
 import { toolCategories } from '../tools'
-import {
-	announceWithheldTools,
-	createTool,
-	isReadOnlyTool,
-	isToolPublished,
-	registerAllTools,
-	registerTools,
-} from './tool-registry'
+import { resolveCeilings, type DeclarableLevel } from './tool-ceilings'
+import { announceWithheldTools, createTool, registerAllTools, registerTools } from './tool-registry'
+import wranglerJsonc from '../../wrangler.jsonc?raw'
 
 const stubServer = () => ({ registerTool: vi.fn() })
 
 type StubbedServer = ReturnType<typeof stubServer>
 
-const register = (server: StubbedServer, tools: ToolDefinition[]) =>
-	registerTools(server as unknown as McpServer, {} as ZendeskClient, tools)
+/** A `delete` ceiling publishes everything, for the tests where publication is not the subject. */
+const register = (
+	server: StubbedServer,
+	tools: ToolDefinition[],
+	ceiling: DeclarableLevel = 'delete'
+) => registerTools(server as unknown as McpServer, {} as ZendeskClient, tools, ceiling)
 
 const publishedBy = (server: StubbedServer): string[] =>
 	server.registerTool.mock.calls.map(([name]) => name as string)
@@ -43,50 +43,76 @@ const handlerRegisteredBy = (server: StubbedServer): (() => Promise<McpToolRespo
 
 const textOf = (response: McpToolResponse) => response.content[0].text
 
-/** A tool of the given name that does nothing, since only its name decides its fate here. */
-const namedTool = (name: string) => createTool(name, `The ${name} tool`, {}, async () => ({}))
+/** A tool of the given level that does nothing, since only its level decides its fate here. */
+const levelledTool = (name: string, level: DeclarableLevel = 'read') =>
+	createTool(name, level, `The ${name} tool`, {}, async () => ({}))
 
-describe('isReadOnlyTool', () => {
-	it.each(['list_macros', 'get_macro', 'search_tickets', 'search', 'support_info'])(
-		'recognises %s as a read',
-		(name) => {
-			expect(isReadOnlyTool(name)).toBe(true)
-		}
-	)
+/**
+ * The ceilings the production worker actually ships, read from wrangler.jsonc itself rather
+ * than restated here — restating them would let the file and the test drift apart, and the
+ * drift is exactly what the pinned inventory below exists to catch.
+ */
+const shippedCeilings = () => {
+	const config = parse(wranglerJsonc) as { vars: { TOOL_CEILINGS: unknown } }
 
-	it.each(['create_macro', 'update_macro', 'delete_macro', 'add_tags'])(
-		'does not recognise %s as a read',
-		(name) => {
-			expect(isReadOnlyTool(name)).toBe(false)
-		}
-	)
-})
-
-describe('isToolPublished', () => {
-	it('publishes the two macro writes by name', () => {
-		expect(isToolPublished('create_macro')).toBe(true)
-		expect(isToolPublished('update_macro')).toBe(true)
-	})
-
-	// The whole point of naming tools one at a time rather than permitting a `create_` prefix:
-	// permitting macro creation must not carry the next create tool anybody writes along with it.
-	it('does not publish another write that merely looks like a permitted one', () => {
-		expect(isToolPublished('create_trigger')).toBe(false)
-		expect(isToolPublished('update_ticket')).toBe(false)
-	})
-
-	it('withholds macro deletion, which the set deliberately leaves out', () => {
-		expect(isToolPublished('delete_macro')).toBe(false)
-	})
-})
+	return resolveCeilings(config.vars.TOOL_CEILINGS, Object.keys(toolCategories))
+}
 
 describe('registerTools', () => {
-	it('hands each published tool to the server under its own name', () => {
+	it('publishes a tool whose level sits at or under the ceiling', () => {
 		const server = stubServer()
 
-		register(server, [namedTool('list_macros'), namedTool('create_macro')])
+		register(
+			server,
+			[levelledTool('list_macros', 'read'), levelledTool('create_macro', 'stage')],
+			'stage'
+		)
 
 		expect(publishedBy(server)).toEqual(['list_macros', 'create_macro'])
+	})
+
+	it('withholds a tool whose level sits above the ceiling', () => {
+		const server = stubServer()
+
+		register(
+			server,
+			[levelledTool('create_ticket', 'write'), levelledTool('delete_ticket', 'delete')],
+			'stage'
+		)
+
+		expect(server.registerTool).not.toHaveBeenCalled()
+	})
+
+	// The order is the vocabulary's one load-bearing fact — read < stage < write < delete —
+	// so it is pinned pair by pair rather than trusted to the rank table staying sorted.
+	it.each([
+		['read', ['read']],
+		['stage', ['read', 'stage']],
+		['write', ['read', 'stage', 'write']],
+		['delete', ['read', 'stage', 'write', 'delete']],
+	] as const)('a %s ceiling publishes exactly the levels under it', (ceiling, published) => {
+		const server = stubServer()
+		const tools = (['read', 'stage', 'write', 'delete'] as const).map((level) =>
+			levelledTool(`${level}_tool`, level)
+		)
+
+		register(server, tools, ceiling)
+
+		expect(publishedBy(server)).toEqual(published.map((level) => `${level}_tool`))
+	})
+
+	it('reports the withheld names back to the caller', () => {
+		const withheld = register(
+			stubServer(),
+			[
+				levelledTool('get_macro', 'read'),
+				levelledTool('delete_macro', 'delete'),
+				levelledTool('create_ticket', 'write'),
+			],
+			'stage'
+		)
+
+		expect(withheld).toEqual(['delete_macro', 'create_ticket'])
 	})
 
 	// A description reaching the server used to depend on argument position: SDK v1 chose an
@@ -96,7 +122,7 @@ describe('registerTools', () => {
 	// it was protecting is what matters, not the mechanism that once broke it.
 	it('passes the description along, not just the name and the schema', () => {
 		const server = stubServer()
-		const tool = namedTool('list_macros')
+		const tool = levelledTool('list_macros')
 
 		register(server, [tool])
 
@@ -114,6 +140,7 @@ describe('registerTools', () => {
 		const server = stubServer()
 		const tool = createTool(
 			'list_macros',
+			'read',
 			'List macros',
 			{ page: z.number().optional() },
 			async () => ({})
@@ -129,27 +156,9 @@ describe('registerTools', () => {
 		expect(config.inputSchema.parse({ page: 2 })).toEqual({ page: 2 })
 	})
 
-	it('never offers a withheld tool to the server at all', () => {
-		const server = stubServer()
-
-		register(server, [namedTool('delete_macro'), namedTool('create_ticket')])
-
-		expect(server.registerTool).not.toHaveBeenCalled()
-	})
-
-	it('reports the withheld names back to the caller', () => {
-		const withheld = register(stubServer(), [
-			namedTool('get_macro'),
-			namedTool('delete_macro'),
-			namedTool('create_ticket'),
-		])
-
-		expect(withheld).toEqual(['delete_macro', 'create_ticket'])
-	})
-
 	it('wraps the handler so a failed call reaches the client as an error response', async () => {
 		const server = stubServer()
-		const tool = createTool('list_macros', 'List macros', {}, async () => {
+		const tool = createTool('list_macros', 'read', 'List macros', {}, async () => {
 			throw new Error('Zendesk API Error: 503 - unavailable')
 		})
 
@@ -169,6 +178,7 @@ describe('registerTools', () => {
 		const created = { macro: { id: 42 } }
 		const tool = createTool(
 			'create_macro',
+			'stage',
 			'Create a macro',
 			{},
 			async () => created,
@@ -188,6 +198,7 @@ describe('registerTools', () => {
 		const server = stubServer()
 		const tool = createTool(
 			'create_macro',
+			'stage',
 			'Create a macro',
 			{},
 			async () => {
@@ -204,35 +215,91 @@ describe('registerTools', () => {
 	})
 })
 
-describe('registerAllTools, over every tool the server defines', () => {
-	const publishEverything = () => {
+describe('registerAllTools, under the ceilings wrangler.jsonc actually ships', () => {
+	const publishShipped = () => {
 		const server = stubServer()
-		registerAllTools(server as unknown as McpServer, {} as ZendeskClient, toolCategories)
+		registerAllTools(
+			server as unknown as McpServer,
+			{} as ZendeskClient,
+			toolCategories,
+			shippedCeilings().ceilings
+		)
 		return publishedBy(server)
 	}
 
-	it('publishes the macro writes', () => {
-		expect(publishEverything()).toEqual(expect.arrayContaining(['create_macro', 'update_macro']))
-	})
-
-	// The assertion that matters, and the reason it is written as a set difference rather than
-	// as a list of the tools withheld today: a write added anywhere under src/tools fails this
-	// the moment it is published, without anyone having to remember to name it here.
-	it('publishes nothing else that is not a read', () => {
-		const writes = publishEverything().filter((name) => !isReadOnlyTool(name))
-
-		expect(writes.sort()).toEqual(['create_macro', 'update_macro'])
+	// The pinned inventory, and the review choke point the old central allowlist used to be.
+	// Under ceilings, a level annotation in a tool file can publish itself into any group whose
+	// ceiling already covers it, and that diff reads as routine plumbing — so the published
+	// surface is asserted here exactly, in order, and any change to it has to arrive as an
+	// explicit edit to this list that somebody justifies. The order matters too: it is the
+	// deterministic tool list the tools/list cache reasoning leans on.
+	it('publishes exactly the shipped surface, in registration order', () => {
+		expect(publishShipped()).toEqual([
+			'list_tickets',
+			'get_ticket',
+			'search_tickets',
+			'list_users',
+			'get_user',
+			'search_users',
+			'list_organizations',
+			'get_organization',
+			'search_organizations',
+			'list_groups',
+			'get_group',
+			'list_macros',
+			'get_macro',
+			'create_macro',
+			'update_macro',
+			'list_views',
+			'get_view',
+			'list_triggers',
+			'get_trigger',
+			'list_automations',
+			'get_automation',
+			'search',
+			'list_articles',
+			'get_article',
+			'search_articles',
+			'list_categories',
+			'get_category',
+			'search_categories',
+			'list_sections',
+			'get_section',
+			'search_sections',
+			'get_help_center_hierarchy',
+			'list_articles_by_section',
+			'support_info',
+			'get_talk_stats',
+			'list_chats',
+		])
 	})
 
 	it('reports every withheld name back to the caller', () => {
 		const withheld = registerAllTools(
 			stubServer() as unknown as McpServer,
 			{} as ZendeskClient,
-			toolCategories
+			toolCategories,
+			shippedCeilings().ceilings
 		)
 
 		expect(withheld).toContain('delete_ticket')
 		expect(withheld).not.toContain('create_macro')
+	})
+
+	// The runtime backstop for a category that lands in toolCategories before the shipped
+	// TOOL_CEILINGS names it. The config test fails validate on that drift; this is what the
+	// deployed worker does in the meantime, and it has to fail closed rather than open.
+	it('treats a group the ceilings never named as read-only', () => {
+		const server = stubServer()
+
+		registerAllTools(
+			server as unknown as McpServer,
+			{} as ZendeskClient,
+			{ widgets: [levelledTool('list_widgets', 'read'), levelledTool('create_widget', 'stage')] },
+			{}
+		)
+
+		expect(publishedBy(server)).toEqual(['list_widgets'])
 	})
 })
 
@@ -240,32 +307,51 @@ describe('announceWithheldTools', () => {
 	// Created in a beforeEach because restoreMocks undoes it between tests, and one made at
 	// module scope would be gone before the first test ran.
 	let log: MockInstance<typeof console.log>
+	let error: MockInstance<typeof console.error>
 
 	beforeEach(() => {
 		log = vi.spyOn(console, 'log').mockImplementation(() => {})
+		error = vi.spyOn(console, 'error').mockImplementation(() => {})
 	})
 
-	it('says what it withheld and what it let through', () => {
-		announceWithheldTools(toolCategories)
+	it('names every ceiling and what those ceilings withheld', () => {
+		announceWithheldTools(toolCategories, shippedCeilings())
 
-		expect(log).toHaveBeenCalledWith(
-			expect.stringContaining('Permitted writes: create_macro, update_macro')
-		)
+		expect(log).toHaveBeenCalledWith(expect.stringContaining('macros=stage'))
+		expect(log).toHaveBeenCalledWith(expect.stringContaining('tickets=read'))
 		expect(log).toHaveBeenCalledWith(expect.stringContaining('delete_ticket'))
 	})
 
-	// The reason this is a function of the definitions rather than a side effect of registering:
-	// since #40 the server is rebuilt per request, so announcing from inside registration would
-	// repeat the whole list on every tool call.
-	it('needs no server, so it can be said once at startup', () => {
-		announceWithheldTools(toolCategories)
+	it('says so when the ceilings withhold nothing', () => {
+		announceWithheldTools(
+			{ reads: [levelledTool('list_macros', 'read')] },
+			{ ceilings: { reads: 'read' } }
+		)
 
-		expect(log).toHaveBeenCalledTimes(1)
+		expect(log).toHaveBeenCalledWith(expect.stringContaining('Withholding nothing'))
+		expect(error).not.toHaveBeenCalled()
 	})
 
-	it('stays quiet when nothing is withheld', () => {
-		announceWithheldTools({ reads: [namedTool('list_macros')] })
+	// The refusal itself is logged per affected request by the caller in src/index.ts, not
+	// here — this runs once per isolate, so erroring from it would understate a config that
+	// is broken right now. The announcement's job is naming the fallback the refusal caused.
+	it('announces the read-only fallback of a refused config without logging the refusal', () => {
+		const refused = resolveCeilings(undefined, Object.keys(toolCategories))
 
-		expect(log).not.toHaveBeenCalled()
+		announceWithheldTools(toolCategories, refused)
+
+		expect(log).toHaveBeenCalledWith(expect.stringContaining('macros=read'))
+		expect(error).not.toHaveBeenCalled()
+	})
+
+	// The same read-only backstop registerAllTools applies, so the announcement never claims
+	// more is published than registration would actually publish.
+	it('counts a group the ceilings never named as withheld above read', () => {
+		announceWithheldTools(
+			{ widgets: [levelledTool('list_widgets', 'read'), levelledTool('create_widget', 'stage')] },
+			{ ceilings: {} }
+		)
+
+		expect(log).toHaveBeenCalledWith(expect.stringContaining('create_widget'))
 	})
 })

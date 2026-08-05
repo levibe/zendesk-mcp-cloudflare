@@ -6,6 +6,7 @@ import { requireChanges } from '../utils/require-changes'
 export const groupsTools: ToolDefinition[] = [
 	createTool(
 		'list_groups',
+		'read',
 		'List agent groups in Zendesk',
 		paginationSchema,
 		async (client, params) => {
@@ -15,6 +16,7 @@ export const groupsTools: ToolDefinition[] = [
 
 	createTool(
 		'get_group',
+		'read',
 		'Get a specific group by ID',
 		{ id: idSchema.describe('Group ID') },
 		async (client, { id }) => {
@@ -22,10 +24,11 @@ export const groupsTools: ToolDefinition[] = [
 		}
 	),
 
-	// Withheld by `WRITE_TOOLS_ENABLED` in utils/tool-registry, like every write that is not
-	// named there.
+	// Declared `write` — an agent group is live routing the moment it exists — and withheld
+	// while its ceiling ships at `read`.
 	createTool(
 		'create_group',
+		'write',
 		'Create a new agent group',
 		createGroupSchema,
 		async (client, params) => {
@@ -36,6 +39,7 @@ export const groupsTools: ToolDefinition[] = [
 
 	createTool(
 		'update_group',
+		'write',
 		'Update an existing agent group. Any field left out keeps its current value.',
 		{ id: idSchema.describe('Group ID to update'), ...updateGroupSchema },
 		async (client, { id, ...changes }) => {

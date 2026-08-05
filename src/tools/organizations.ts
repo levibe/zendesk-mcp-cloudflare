@@ -14,6 +14,7 @@ import { executeSearchWithStandardizedResponse } from '../utils/search-response'
 export const organizationsTools: ToolDefinition[] = [
 	createTool(
 		'list_organizations',
+		'read',
 		'List organizations in Zendesk',
 		paginationSchema,
 		async (client, params) => {
@@ -23,6 +24,7 @@ export const organizationsTools: ToolDefinition[] = [
 
 	createTool(
 		'get_organization',
+		'read',
 		'Get a specific organization by ID',
 		{ id: idSchema.describe('Organization ID') },
 		async (client, { id }) => {
@@ -30,11 +32,13 @@ export const organizationsTools: ToolDefinition[] = [
 		}
 	),
 
-	// Withheld by `WRITE_TOOLS_ENABLED` in utils/tool-registry. `domain_names` is settable at
-	// creation only, because it is a membership rule rather than a property — see
-	// `createOrganizationSchema` for that argument.
+	// Declared `write` — an organization is live the moment it exists — and withheld while the
+	// organizations ceiling ships at `read`. `domain_names` is settable at creation only,
+	// because it is a membership rule rather than a property — see `createOrganizationSchema`
+	// for that argument.
 	createTool(
 		'create_organization',
+		'write',
 		'Create a new organization',
 		createOrganizationSchema,
 		async (client, params) => {
@@ -45,6 +49,7 @@ export const organizationsTools: ToolDefinition[] = [
 
 	createTool(
 		'update_organization',
+		'write',
 		"Update an existing organization. Any field left out keeps its current value, except that sending tags replaces the whole set. This cannot change the organization's domain names, which decide automatic membership and are managed in the Zendesk UI.",
 		{ id: idSchema.describe('Organization ID to update'), ...updateOrganizationSchema },
 		async (client, { id, ...changes }) => {
@@ -57,6 +62,7 @@ export const organizationsTools: ToolDefinition[] = [
 
 	createTool(
 		'search_organizations',
+		'read',
 		'Search for organizations with organization-specific filtering',
 		{
 			query: z.string().describe('Search query for organizations (e.g., company name, domain)'),

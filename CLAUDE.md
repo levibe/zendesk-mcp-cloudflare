@@ -25,7 +25,7 @@ It comes apart under concurrency, and through teardown rather than dispatch: fin
 
 Anything genuinely needing to survive across calls has to become an explicit handle: the server mints it, returns it, and the model passes it back as an ordinary tool argument. There is nowhere else to put it.
 
-Two things follow that are easy to get wrong. Work that should happen once per isolate must not sit inside the factory, or it repeats on every tool call — `announceWithheldTools` is separate from `registerAllTools` for exactly this reason, and the comment on it explains the split. And `this.env` is gone along with the class, so `env` arrives as a `fetch` argument and is threaded to whatever needs it.
+Two things follow that are easy to get wrong. Work that should happen once per isolate must not sit inside the factory, or it repeats on every tool call — `announceWithheldTools` is separate from `registerAllTools` for exactly this reason, invoked from `fetch` behind a once-per-isolate flag because the ceilings it names come from `env`, which module scope never sees. And `this.env` is gone along with the class, so `env` arrives as a `fetch` argument and is threaded to whatever needs it.
 
 `/sse` no longer exists. It served the HTTP+SSE transport, which this revision reclassifies as formally deprecated, and it was the last thing requiring the Durable Object. Older clients are not stranded by that, since `createMcpHandler` defaults to `legacy: 'stateless'` and still answers requests that arrive without the 2026-07-28 envelope; what stopped working is a client that can speak nothing but HTTP+SSE.
 
@@ -35,15 +35,15 @@ What the default permits a browser depends on the deployment, which is the part 
 
 ### The tool list's TTL is the only staleness bound
 
-`tools/list` is cached, through `cacheHints` on the `McpServer` constructor in `src/index.ts`, where the TTL and the reasoning for it sit together. Revision 2026-07-28 requires `ttlMs` and `cacheScope` on every cacheable result, and the SDK fills them with `ttlMs: 0` when nobody says otherwise — the fields present and the feature off, which is the right default for a server it knows nothing about. This list earns better, because it does not vary: `toolCategories` is a fixed literal, both allowlists are compile-time constants, and registration never consults the authenticated user, so two clients signed in as different people get identical bytes. Deterministic ordering, which the revision asks for in the same breath, falls out of registration walking the categories in declaration order — worth knowing before someone adds a sort to "fix" it.
+`tools/list` is cached, through `cacheHints` on the `McpServer` constructor in `src/index.ts`, where the TTL and the reasoning for it sit together. Revision 2026-07-28 requires `ttlMs` and `cacheScope` on every cacheable result, and the SDK fills them with `ttlMs: 0` when nobody says otherwise — the fields present and the feature off, which is the right default for a server it knows nothing about. This list earns better, because it does not vary within a deployment: `toolCategories` is a fixed literal, the ceilings are this deployment's `wrangler.jsonc`, and registration never consults the authenticated user, so two clients signed in as different people get identical bytes. Deterministic ordering, which the revision asks for in the same breath, falls out of registration walking the categories in declaration order — worth knowing before someone adds a sort to "fix" it.
 
 The number is the part to be careful with, because a TTL here is not a hint that a client may re-check sooner. It is the only bound on staleness there is, since this server cannot tell a client the list changed. `tools/list_changed` reaches a client over `subscriptions/listen`, which needs a long-lived handler holding an event bus, and the handler is built inside `fetch`, so every request gets a fresh bus with no subscribers. Hoisting it would not fix that either: the bus is in-memory and per-isolate, so it would reach only the clients that happened to land on the isolate where something changed. Notification across a Workers deployment is a harder problem than it looks, and not one worth solving for a list that changes a few times a year. So read the TTL as an answer to "how long may a client go on offering a tool we have removed", and raise it only with that question in view.
 
 Only clients on 2026-07-28 are affected either way. The fields are filled at the modern codec's encode seam, so a request arriving without the envelope — the ones `legacy: 'stateless'` still answers — carries no cache fields at all and re-lists every time. Nothing to fix there; it is just not the whole of the traffic that the TTL governs.
 
-A stale list is a staleness problem rather than a security one, which is the reassuring half. Registration re-runs per request, so a tool dropped from `WRITE_TOOLS_ENABLED` stops existing the moment the new code is live. A client holding the old list can still see it, and gets `Tool not found` when it calls, because the publication policy is enforced at call time and not by what the list happens to say.
+A stale list is a staleness problem rather than a security one, which is the reassuring half. Registration re-runs per request, so a tool a lowered ceiling no longer covers stops existing the moment the new deploy is live. A client holding the old list can still see it, and gets `Tool not found` when it calls, because the publication policy is enforced at call time and not by what the list happens to say.
 
-`cacheScope` is `private` deliberately. The body is identical for every caller, which is the test `public` actually applies, but `public` would add only sharing through an intermediary and there is none here — the connector fetches server-side and `mcp-remote` runs per user. Per-deployment configuration would keep that true, since a deployment is one URL with one list; a per-user permission model would not, which is the thing to re-check if #20 lands.
+`cacheScope` is `private` deliberately. The body is identical for every caller, which is the test `public` actually applies, but `public` would add only sharing through an intermediary and there is none here — the connector fetches server-side and `mcp-remote` runs per user. Per-deployment configuration keeps that true, since a deployment is one URL with one list; a per-identity permission model would not, which is the thing to re-check if #91 lands.
 
 ### A cookie is what binds the OAuth state, and a signature would not
 
@@ -59,7 +59,7 @@ Three details each fail in a way that looks like something else:
 
 `/callback` cannot restart the flow to soften that, which is the thing to re-derive before adding it. Restarting means calling `redirectToGoogle` directly, and `GET /authorize` only reaches that after the approval gate — so a restart skips consent, and the victim signs in against whatever `clientId` and `redirectUri` the attacker's state carried. That inverts the attack rather than fixing it.
 
-This still matters more later than now: every Zendesk request goes out under one shared service account, so a signed-in identity grants no differential access. #20 is what changes that.
+This still matters more later than now: every Zendesk request goes out under one shared service account, so a signed-in identity grants no differential access. #91 is what changes that.
 
 ### Key Files
 
@@ -124,7 +124,7 @@ Set these via `pnpm exec wrangler secret put <SECRET_NAME>`:
 - `ZENDESK_API_TOKEN` - Zendesk API token
 - `HOSTED_DOMAIN` - (Optional) Restrict to specific Google domain
 
-Everything above is a secret, including `ZENDESK_SUBDOMAIN` and `ZENDESK_EMAIL`, which are not sensitive. Set new deployment config the same way rather than as a dashboard var, because a var does not survive: Workers Builds deploys the production branch with `wrangler deploy`, which honours `keep_vars`, but builds every other branch with `wrangler versions upload`, which takes no equivalent and clears plain vars while leaving encrypted ones alone. So a var lasts until the next pull request, and then fails as missing credentials at request time, pointing nowhere near the deploy that removed it.
+Everything above is a secret, including `ZENDESK_SUBDOMAIN` and `ZENDESK_EMAIL`, which are not sensitive. The line is not sensitivity but where the value is set: anything set outside the repo is a secret, and non-secret deployment policy — `TOOL_CEILINGS` — is a var declared in `wrangler.jsonc` itself, where it is reviewed, versioned, and re-stated from the file on every deploy path. What must never exist is a dashboard-set plain var, because it does not survive: Workers Builds deploys the production branch with `wrangler deploy`, which honours `keep_vars`, but builds every other branch with `wrangler versions upload`, which takes no equivalent and clears plain vars while leaving encrypted ones and file-set ones alone. So a dashboard var lasts until the next pull request, and then fails as missing credentials at request time, pointing nowhere near the deploy that removed it.
 
 Builds for non-production branches are switched off in the Workers Builds settings, which stops that at the source. That decision lives in a dashboard rather than in this repo, so it is recorded here — otherwise the only trace of it is an absence, and turning it back on looks free. Keep the secrets rule above whether or not those builds are on: it is what makes re-enabling them safe, and it is the half of this that a pull request can actually protect.
 
@@ -151,24 +151,25 @@ pnpm exec wrangler kv namespace create "OAUTH_KV"
 
 ## Which tools a client can actually use
 
-Tools live in `src/tools/`, one file per Zendesk resource, gathered into `toolCategories` in `src/tools/index.ts`. Defining one there does not publish it, so the list a client sees is shorter than the list in the tree. There is no inventory of either here: read the definitions, or start the server and read the line it logs naming everything it withheld.
+Tools live in `src/tools/`, one file per Zendesk resource, gathered into `toolCategories` in `src/tools/index.ts`. Defining one there does not publish it, so the list a client sees is shorter than the list in the tree. There is no inventory of either here: read the definitions, or make a request and read the line the worker logs naming each group's ceiling and everything it withheld.
 
-Two allowlists in `src/utils/tool-registry.ts` decide, and a tool has to satisfy one of them:
+Publication is a comparison of two declarations. Every tool declares a reach level at its definition site — the vocabulary is in `src/utils/tool-ceilings.ts`, ordered `read < stage < write < delete` and drawn on whether the thing takes effect without a human having looked at it — and `wrangler.jsonc` carries a ceiling per group in `TOOL_CEILINGS`. Registration offers a tool exactly when its level fits under its group's ceiling. `create_ticket` and `delete_ticket` are defined, compiled and covered by the type checker, and no client is offered them, because `write` and `delete` sit above the `read` their group ships with.
 
-- `isReadOnlyTool` covers the query verbs — the `list_`, `get_` and `search_` prefixes, plus `search` and `support_info` by name.
-- `WRITE_TOOLS_ENABLED` names the individual writes permitted anyway, and is the authority on which ones. The comment on that set carries the test a write has to pass to get in, and is the place to argue about adding one.
+`activate` — making a staged thing take effect: enabling a rule, publishing an article — is in the vocabulary and deliberately unusable. No tool can declare it and no ceiling can permit it, so "this server never activates anything" is a type rather than a habit shared by whichever files currently observe it. The full vocabulary and the declarable subset are separate types on purpose: the ban is this server's policy, not a limitation of the mechanism, and a future consumer of the mechanism argues for its own subset rather than forking the vocabulary.
 
-Anything satisfying neither is withheld at registration and cannot be reached by any client. `create_ticket` and `delete_ticket` are defined, compiled and covered by the type checker, and no client is ever offered them.
+The level is a required argument of `createTool` with no default, so a newly added tool stays unexposed until somebody classifies it deliberately — the safety property is not "reads are allowed", it is "nothing is exposed until a human classified it". The tool's name plays no part in publication, so no naming convention ever publishes a future tool by itself. And a withheld tool is deliberately live code — compiled, linted, tested — because the withholding is a runtime comparison against configuration, which no static analysis can prove dead. Commenting tools out, or gating them behind compile-time booleans that make `validate` report unreachable code, is the anti-pattern this design exists to end.
 
-Both rules are allowlists rather than denylists on purpose, so a newly added tool stays unexposed until somebody classifies it deliberately. That is why permitting a write means adding its name to the set, and why adding `create_` to the prefixes above would be the wrong shortcut — a prefix publishes every future create tool on the day it is written, which inverts the property the rule exists to hold.
+Two tests hold the published surface still. The config test in `src/utils/tool-ceilings.test.ts` parses `wrangler.jsonc` itself and fails `validate` when `TOOL_CEILINGS` is malformed or drifts from `toolCategories` — which matters because at runtime a bad config fails closed to `read` on every group, and the error logged on every affected request is the only other symptom. The pinned inventory in `src/utils/tool-registry.test.ts` asserts the exact published list, in order, so any change to what clients see has to arrive as an explicit edit to that test that somebody justifies.
+
+Changing what a deployment offers is an edit to `TOOL_CEILINGS` in `wrangler.jsonc`: reviewed, versioned, and atomic with the code that reads it, since file vars are re-stated on every deploy path. Raising a ceiling is the deliberate act that editing the old write allowlist used to be.
 
 ### A business rule this server builds can never be running
 
-The trigger and automation writes carry a second guardrail that has nothing to do with the allowlist, and it is the reason they were safe to write before anyone decided to publish them. Neither `createTriggerSchema` nor `createAutomationSchema` accepts `active`, and the two create handlers send `active: false` themselves — Zendesk defaults a new rule to active, so leaving the field out would have built a live one. The update shapes leave `active` out for the same reason, which is the half that makes the other half mean anything: a rule that could be created dormant and enabled by the next call was never dormant. Turning one on is a human action in the Zendesk UI, and this server offers no way to do it.
+The trigger and automation writes carry a second guardrail that does not depend on the ceilings, and it is the reason they were safe to write before anyone decided to publish them. Neither `createTriggerSchema` nor `createAutomationSchema` accepts `active`, and the two create handlers send `active: false` themselves — Zendesk defaults a new rule to active, so leaving the field out would have built a live one. The update shapes leave `active` out for the same reason, which is the half that makes the other half mean anything: a rule that could be created dormant and enabled by the next call was never dormant. Turning one on is a human action in the Zendesk UI, and this server offers no way to do it.
 
 `TriggerCreatePayload` and `AutomationCreatePayload` intersect their inferred shape with `{ active: false }` so the compiler holds that rather than a reviewer. A handler passing its validated parameters straight through stops type-checking.
 
-The notification actions — everything named `notification_*`, plus `tweet_requester` and `satisfaction_score` — are refused by `businessRuleActionSchema`. That one is a denylist, which is the opposite shape from the allowlists above, and the difference is worth keeping rather than tidying. Tool names are ours and finite, so an allowlist works there. Action fields are Zendesk's and are not: a custom field action is `custom_fields_12345`, so any allowlist wide enough to accept one accepts anything. The prefix does the work, and a notification action Zendesk names some other way would get through — which is precisely why it is not the only control.
+The notification actions — everything named `notification_*`, plus `tweet_requester` and `satisfaction_score` — are refused by `businessRuleActionSchema`. That one is a denylist, which is the opposite shape from the level-and-ceiling comparison above, and the difference is worth keeping rather than tidying. A declared level and a configured ceiling are closed vocabularies of ours, so an exact rule works there. Action fields are Zendesk's and are not: a custom field action is `custom_fields_12345`, so any allowlist wide enough to accept one accepts anything. The prefix does the work, and a notification action Zendesk names some other way would get through — which is precisely why it is not the only control.
 
 ### A view this server builds is offered to nobody
 
@@ -180,7 +181,7 @@ Views speak the same per-condition grammar as the business rules but get their o
 
 The user and organization updates are deliberately narrower than their creates, on the article pattern: the sharp fields are stated once, and revision is confined to description. `email`, `role` and `verified` decide where a user's mail goes, what the account may do and whether an identity check happened — rewriting them on a live account is how an account changes hands, so `update_user` offers name and phone and nothing else. Membership is the same rule seen from two sides: `domain_names` on an organization moves a whole email domain in automatically, and `organization_id` on a user moves one person deliberately, but both can change what shared tickets someone sees — so both are settable at creation only.
 
-Creation does not offer `role` at all: every user this server creates is an end-user — `UserCreatePayload` pins `role: 'end-user'` the way the business rule payloads pin `active: false`, so the handler has to state it and forgetting it stops compiling. A privileged account at a caller-chosen email is a takeover in one call — the password reset goes wherever the email points — and an agent is a staff account whose ticket access is a group membership away, so the argument that shuts out `admin` shuts out `agent` with it. Minting either stays a human action in the Zendesk UI until #20's permission model gives the distinction somewhere to live.
+Creation does not offer `role` at all: every user this server creates is an end-user — `UserCreatePayload` pins `role: 'end-user'` the way the business rule payloads pin `active: false`, so the handler has to state it and forgetting it stops compiling. A privileged account at a caller-chosen email is a takeover in one call — the password reset goes wherever the email points — and an agent is a staff account whose ticket access is a group membership away, so the argument that shuts out `admin` shuts out `agent` with it. Minting either stays a human action in the Zendesk UI until #91's per-identity permission model gives the distinction somewhere to live.
 
 ### An article this server writes is always a draft, and its audience is set once
 
@@ -261,10 +262,11 @@ Add to Claude Desktop config. Leave the command below as `npx`, not `pnpm dlx`: 
 To add new Zendesk tools:
 
 1. Add the API method to the `ZendeskClient` class in `src/zendesk-client.ts`
-2. Add a `createTool(...)` entry to the relevant `ToolDefinition[]` in `src/tools/`. A brand new file also has to be added to `toolCategories` in `src/tools/index.ts` — exporting it alone does not register it.
+2. Add a `createTool(...)` entry to the relevant `ToolDefinition[]` in `src/tools/`, declaring the tool's reach level — the classification is the deliberate act, so think about it rather than pattern-matching the verb; `src/utils/tool-ceilings.ts` holds the vocabulary. A brand new file also has to be added to `toolCategories` in `src/tools/index.ts` — exporting it alone does not register it — and a brand new category needs its ceiling named in `TOOL_CEILINGS` in `wrangler.jsonc`, which the config test will remind you of by failing `validate`.
    ```typescript
    createTool(
    	'list_widgets',
+   	'read',
    	'List widgets in Zendesk',
    	{ ...paginationSchema },
    	async (client, params) => {
@@ -279,14 +281,14 @@ Do not call `server.registerTool` directly. Everything goes through `createTool`
 
 Keep passing `createTool` a bare shape. The registry wraps it in `z.object` before handing it on, because SDK v2 deprecates the overload taking a raw `{ field: z.string() }` record even though it still accepts one. Wrapping in one place is what lets every tool definition go on spreading shared shapes.
 
-**Registration is where the publication policy is enforced.** `registerTools` withholds anything that is neither a read nor a named write, as described above. A tool registered directly against the server would skip that check and reach clients whatever it does.
+**Registration is where the publication policy is enforced.** `registerTools` withholds anything the group's ceiling does not cover, as described above. A tool registered directly against the server would skip that check and reach clients whatever it does.
 
 A write tool also has to keep its hands off the response. Handlers return the client's result and let the single `withErrorHandling` in `registerTools` shape it, the way every read tool does. A handler that builds a finished response of its own gets wrapped a second time, so the inner response is JSON-encoded as the text of the outer one — which buries `isError` where no client can see it, and a write Zendesk rejected reads back as a successful call. That is why `registerTools` is the only place that calls `withErrorHandling`, and why a `no-restricted-imports` rule in `eslint.config.mjs` stops a handler importing it — every write handler in the tree had eroded off this rule at once, because nothing about a double-wrapped response looks wrong until a write fails. The wrappers that used to do this per verb are gone.
 
-A worded confirmation travels as the fifth argument to `createTool` instead, so registration can apply it from inside that one wrapper:
+A worded confirmation travels as the final argument to `createTool` instead, so registration can apply it from inside that one wrapper:
 
 ```typescript
-createTool('create_widget', 'Create a widget', schema, handler, 'Widget created successfully!')
+createTool('create_widget', 'stage', 'Create a widget', schema, handler, 'Widget created!')
 ```
 
 It heads the record on the success path only, so carrying one cannot dress a failure up as a success. A handler with nothing to head returns its whole answer as a string, which `withErrorHandling` passes through untouched — `delete_ticket` is the one doing that, since a successful delete comes back empty and the sentence has to name the id.

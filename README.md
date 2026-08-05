@@ -13,13 +13,13 @@ It reads widely across Zendesk and writes almost nothing.
 - **Talk and Chat**: call statistics and chat conversations
 - **Support**: general configuration information
 
-Anything named `list_*`, `get_*` or `search_*` is available, along with `search` and `support_info`.
+Every read tool is available: the `list_*`, `get_*` and `search_*` tools, plus `search` and `support_info`.
 
 **Writing is limited to `create_macro` and `update_macro`.** A macro is a shortcut an agent applies to a ticket by hand, so creating one changes nothing on its own, which is why these two are permitted where nothing else is.
 
-**Everything else is refused.** Tickets, Help Center articles, triggers, automations, views, users, organizations and groups all have write tools that are written, tested and never offered to a client, so asking for one will not work. Nothing else writes at all: deleting a macro, for instance, was never built as a tool. The permitted set is decided in `src/utils/tool-registry.ts`, and the server logs what it withheld each time it starts.
+**Everything else is refused.** Tickets, Help Center articles, triggers, automations, views, users, organizations and groups all have write tools that are written, tested and never offered to a client, so asking for one will not work. Nothing else writes at all: deleting a macro, for instance, was never built as a tool. The permitted set is decided by `TOOL_CEILINGS` in `wrangler.jsonc`, which gives each tool group a ceiling on how far its tools may reach, and the server logs the ceilings and everything they withhold on its first request.
 
-Several of those carry a second guardrail that outlives the allowlist. An article this server creates is always a draft, and there is no way to publish one through it at all; a trigger, automation or view is always created switched off, and turning one on stays a human action in Zendesk; a user it creates is always an end-user, never an agent or an admin. CLAUDE.md sets out why each is shaped that way.
+Several of those carry a second guardrail that does not depend on the ceilings. An article this server creates is always a draft, and there is no way to publish one through it at all; a trigger, automation or view is always created switched off, and turning one on stays a human action in Zendesk; a user it creates is always an end-user, never an agent or an admin. CLAUDE.md sets out why each is shaped that way.
 
 ## How it works
 
@@ -227,14 +227,15 @@ OpenAI is direct that Developer Mode is for people who understand what they are 
 ### Adding New Tools
 
 1. Add the API method to `ZendeskClient` in `src/zendesk-client.ts`
-2. Add a `createTool` entry to the relevant file under `src/tools/`
-3. If the file is a new one, add it to `toolCategories` in `src/tools/index.ts`. Exporting it is not enough, because registration walks that object and nothing else.
+2. Add a `createTool` entry to the relevant file under `src/tools/`, declaring the tool's reach level
+3. If the file is a new one, add it to `toolCategories` in `src/tools/index.ts`, and name the new group's ceiling in `TOOL_CEILINGS` in `wrangler.jsonc`. Exporting it is not enough, because registration walks that object and nothing else.
 
 ```typescript
 // In src/tools/custom.ts
 export const customTools: ToolDefinition[] = [
 	createTool(
 		'list_widgets',
+		'read',
 		'List widgets in Zendesk',
 		{ ...paginationSchema },
 		async (client, params) => {
@@ -244,6 +245,6 @@ export const customTools: ToolDefinition[] = [
 ]
 ```
 
-Do not annotate the handler's parameters. They are inferred from the schema you pass as the third argument, and writing the type out by hand creates a second source of truth that nothing reconciles.
+Do not annotate the handler's parameters. They are inferred from the schema you pass, and writing the type out by hand creates a second source of truth that nothing reconciles.
 
-Adding a tool does not publish it. A read gets through on its `list_`, `get_` or `search_` prefix, while a write reaches no client at all until it is named in `WRITE_TOOLS_ENABLED` in `src/utils/tool-registry.ts`. CLAUDE.md carries the test a write has to pass to get in.
+Adding a tool does not publish it. Every tool declares a reach level (read, stage, write, or delete), `wrangler.jsonc` sets a ceiling per group, and a tool is offered only when its level fits under its group's ceiling. The shipped config keeps every group at read except macros, which sits at stage. CLAUDE.md carries the vocabulary and the reasoning behind it.

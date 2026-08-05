@@ -5,12 +5,15 @@ import { GoogleHandler } from './google-handler'
 import { ZendeskClient } from './zendesk-client'
 import { toolCategories } from './tools'
 import { announceWithheldTools, registerAllTools } from './utils/tool-registry'
+import { resolveCeilings, type ResolvedCeilings } from './utils/tool-ceilings'
 
 /**
- * Said once when the isolate starts rather than once per request. See the function itself
- * for why it does not ride along with registration any more.
+ * Whether this isolate has announced its ceilings yet. The announcement wants saying once,
+ * but the ceilings come from `env`, which module scope never sees — so the guard lives here
+ * and the announcement happens on the first request instead of at startup. Two first
+ * requests racing can double-log; that is benign and not worth a lock.
  */
-announceWithheldTools(toolCategories)
+let announced = false
 
 /**
  * Builds the server that answers one request, and only one.
@@ -25,7 +28,7 @@ announceWithheldTools(toolCategories)
  * The client is built per request for the same reason, and costs nothing to make — it holds
  * configuration read from `env` and opens no connection of its own.
  */
-const createServer = (env: Env) => {
+const createServer = (env: Env, ceilings: ResolvedCeilings['ceilings']) => {
 	const server = new McpServer(
 		{
 			name: 'Zendesk API Server',
@@ -40,7 +43,7 @@ const createServer = (env: Env) => {
 		{ cacheHints: { 'tools/list': { ttlMs: 300_000, cacheScope: 'private' } } }
 	)
 
-	registerAllTools(server, new ZendeskClient(undefined, env), toolCategories)
+	registerAllTools(server, new ZendeskClient(undefined, env), toolCategories, ceilings)
 
 	return server
 }
@@ -57,8 +60,30 @@ const createServer = (env: Env) => {
  * depends on where this is deployed — see CLAUDE.md, which also records why `/sse` is gone.
  */
 const mcpHandler = {
-	fetch: (request: Request, env: Env, ctx: ExecutionContext): Promise<Response> =>
-		createMcpHandler(() => createServer(env), { route: '/mcp' })(request, env, ctx),
+	fetch: (request: Request, env: Env, ctx: ExecutionContext): Promise<Response> => {
+		// Resolved once per request, like the server itself — it is a small parse of a small
+		// object, and per-request is what keeps a config-only deploy taking effect without a
+		// special path. Malformed or missing config fails closed to read on every group.
+		const resolved = resolveCeilings(env.TOOL_CEILINGS, Object.keys(toolCategories))
+
+		// The refusal is logged on every request it affects, not once behind the flag below:
+		// failing closed is otherwise invisible, and one line per affected request is the
+		// representative loudness for a config that is broken right now.
+		if (resolved.error) {
+			console.error(`TOOL_CEILINGS refused (${resolved.error}); every group falls closed to read`)
+		}
+
+		if (!announced) {
+			announced = true
+			announceWithheldTools(toolCategories, resolved)
+		}
+
+		return createMcpHandler(() => createServer(env, resolved.ceilings), { route: '/mcp' })(
+			request,
+			env,
+			ctx
+		)
+	},
 }
 
 export default new OAuthProvider({
@@ -91,7 +116,7 @@ export default new OAuthProvider({
 	// Google once it has been issued — no `tokenExchangeCallback` is configured, so disabling
 	// somebody's Google account does not reach a grant they already hold. A year is therefore
 	// also the window a departed colleague keeps full access for, which is the cost this number
-	// buys and the thing #20 is what actually fixes.
+	// buys and the thing #91 is what actually fixes.
 	refreshTokenTTL: 31_536_000,
 	tokenEndpoint: '/token',
 })

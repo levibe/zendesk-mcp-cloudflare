@@ -15,6 +15,7 @@ import { executeSearchWithStandardizedResponse } from '../utils/search-response'
 export const usersTools: ToolDefinition[] = [
 	createTool(
 		'list_users',
+		'read',
 		'List users in Zendesk',
 		{
 			...paginationSchema,
@@ -27,6 +28,7 @@ export const usersTools: ToolDefinition[] = [
 
 	createTool(
 		'get_user',
+		'read',
 		'Get a specific user by ID',
 		{
 			id: idSchema.describe('User ID'),
@@ -36,12 +38,13 @@ export const usersTools: ToolDefinition[] = [
 		}
 	),
 
-	// Withheld by `WRITE_TOOLS_ENABLED` in utils/tool-registry, like every write below that is
-	// not named there. Who a user is — their email, verified state and organization — is
-	// settable at creation only, and every account this server creates is an end-user; see
-	// `createUserSchema` for both arguments.
+	// Declared `write`, not `stage`: the account it makes is live the moment the call returns.
+	// Withheld while the users ceiling ships at `read`. Who a user is — their email, verified
+	// state and organization — is settable at creation only, and every account this server
+	// creates is an end-user; see `createUserSchema` for both arguments.
 	createTool(
 		'create_user',
+		'write',
 		'Create a new end-user — a customer tickets can be filed for. Agent and admin accounts stay a human action in the Zendesk UI.',
 		createUserSchema,
 		async (client, params) => {
@@ -52,6 +55,7 @@ export const usersTools: ToolDefinition[] = [
 
 	createTool(
 		'update_user',
+		'write',
 		"Update an existing user's profile fields — their name or phone. This cannot change a user's email, role, verified state or organization — email, verified state and organization are set at creation, and role stays managed in the Zendesk UI.",
 		{ id: idSchema.describe('User ID to update'), ...updateUserSchema },
 		async (client, { id, ...changes }) => {
@@ -64,6 +68,7 @@ export const usersTools: ToolDefinition[] = [
 
 	createTool(
 		'search_users',
+		'read',
 		'Search for users with user-specific filtering',
 		{
 			query: z.string().describe('Search query for users (e.g., name, email, or partial matches)'),

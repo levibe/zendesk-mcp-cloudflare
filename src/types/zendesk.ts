@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { ZendeskClient } from '../zendesk-client'
+import type { DeclarableLevel } from '../utils/tool-ceilings'
 
 export interface McpToolResponse {
 	[x: string]: unknown
@@ -26,11 +27,17 @@ export type InferParams<S extends z.ZodRawShape> = z.infer<z.ZodObject<S>>
  * survive into this interface. `createTool` is what keeps the guarantee: it checks each
  * handler against its own schema before widening it to fit here.
  *
+ * `level` is the tool's declared reach — see `tool-ceilings.ts` for the vocabulary — and it is
+ * required rather than defaulted, because a default is either fail-open or a silent withhold.
+ * Whether a client is offered the tool is decided at registration, from this declaration and
+ * the deployment's ceiling for the group, never from the tool's name.
+ *
  * `successMessage` is how a write tool gets its worded confirmation without building a response
  * of its own — see `withErrorHandling` for why that matters.
  */
 export interface ToolDefinition {
 	name: string
+	level: DeclarableLevel
 	description: string
 	schema: z.ZodRawShape
 	handler: (client: ZendeskClient, params: Record<string, unknown>) => Promise<unknown>
@@ -151,8 +158,8 @@ export type TicketUpdatePayload = Omit<InferParams<typeof updateTicketSchema>, '
  * error. A privileged account at a caller-chosen email is a takeover in one call — the
  * password reset goes wherever the email points — and an agent is a staff account whose
  * ticket access is a group membership away, so the argument that shuts out `admin` shuts out
- * `agent` with it. Minting either stays a human action in the Zendesk UI until #20's
- * permission model gives the distinction somewhere to live.
+ * `agent` with it. Minting either stays a human action in the Zendesk UI until #91's
+ * per-identity permission model gives the distinction somewhere to live.
  *
  * `organization_id` is create-only for the reason `domain_names` is on an organization:
  * membership can carry shared ticket visibility, so moving a user into an organization is a
@@ -300,9 +307,10 @@ export type MacroUpdatePayload = InferParams<typeof updateMacroSchema>
  * before anyone reviews the rule. Those are refused at the boundary rather than left for a
  * human to notice, which is what makes the rest of the rule safe to build unattended.
  *
- * This is a denylist, which is the opposite shape from the tool allowlists in
+ * This is a denylist, which is the opposite shape from tool publication in
  * utils/tool-registry, and the difference is worth understanding rather than tidying away.
- * An allowlist works there because tool names are ours and finite. Action fields are
+ * Publication can be an exact comparison because both of its sides — a tool's declared level,
+ * a group's configured ceiling — are closed vocabularies of ours. Action fields are
  * Zendesk's and are not: a custom field action is `custom_fields_12345`, so any allowlist
  * broad enough to accept one is broad enough to accept anything. The prefix carries the
  * weight here — Zendesk has named every notification action `notification_*` — and the two

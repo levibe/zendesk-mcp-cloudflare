@@ -59,6 +59,22 @@ export const coverageThresholds = {
 		functions: 100,
 		lines: 100,
 	},
+	// The two halves of the publication policy: what a config resolves to, and what a ceiling
+	// publishes. Both are small and decide everything about which tools a client is offered,
+	// so any drop here is a regression in the security boundary rather than a rounding
+	// artefact.
+	'src/utils/tool-ceilings.ts': {
+		statements: 100,
+		branches: 100,
+		functions: 100,
+		lines: 100,
+	},
+	'src/utils/tool-registry.ts': {
+		statements: 100,
+		branches: 100,
+		functions: 100,
+		lines: 100,
+	},
 	// Raised from 85 with #54, which drives every method on the client rather than the handful
 	// a test had reached by name. Measured 92 at the time.
 	'src/zendesk-client.ts': { branches: 90 },

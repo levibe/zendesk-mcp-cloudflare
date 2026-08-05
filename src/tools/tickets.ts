@@ -17,6 +17,7 @@ import { executeSearchWithStandardizedResponse } from '../utils/search-response'
 export const ticketsTools: ToolDefinition[] = [
 	createTool(
 		'list_tickets',
+		'read',
 		'List tickets in Zendesk',
 		{
 			...paginationSchema,
@@ -29,6 +30,7 @@ export const ticketsTools: ToolDefinition[] = [
 
 	createTool(
 		'get_ticket',
+		'read',
 		'Get a specific ticket by ID',
 		{
 			id: idSchema.describe('Ticket ID'),
@@ -42,6 +44,7 @@ export const ticketsTools: ToolDefinition[] = [
 	// because that is what a model has to hand, and Zendesk wants it wrapped as `{ body }`.
 	createTool(
 		'create_ticket',
+		'write',
 		'Create a new ticket',
 		createTicketSchema,
 		async (client, { comment, ...rest }) => {
@@ -52,6 +55,7 @@ export const ticketsTools: ToolDefinition[] = [
 
 	createTool(
 		'search_tickets',
+		'read',
 		'Search specifically for tickets with ticket-focused parameters',
 		{
 			query: z
@@ -103,6 +107,7 @@ export const ticketsTools: ToolDefinition[] = [
 
 	createTool(
 		'update_ticket',
+		'write',
 		'Update an existing ticket. Any field left out keeps its current value.',
 		{ id: idSchema.describe('Ticket ID to update'), ...updateTicketSchema },
 		async (client, { id, ...changes }) => {
@@ -119,6 +124,7 @@ export const ticketsTools: ToolDefinition[] = [
 
 	createTool(
 		'delete_ticket',
+		'delete',
 		'Delete a ticket',
 		{
 			id: idSchema.describe('Ticket ID to delete'),
