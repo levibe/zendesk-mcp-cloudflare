@@ -75,6 +75,15 @@ export const coverageThresholds = {
 		functions: 100,
 		lines: 100,
 	},
+	// The factory owns the two invariants that fail silently under local testing — a fresh
+	// server per request, the announcement once per isolate — so a drop here is a regression
+	// in exactly the code whose failure mode is invisible until load.
+	'src/create-mcp-worker.ts': {
+		statements: 100,
+		branches: 100,
+		functions: 100,
+		lines: 100,
+	},
 	// The transport, split out of the client with #93 and carrying the branch coverage the old
 	// { branches: 90 } on zendesk-client.ts was really protecting: the retry decisions, the
 	// deadline arithmetic, the Retry-After handling. Measured 94 at the split; the uncovered
