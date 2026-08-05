@@ -17,7 +17,9 @@ Anything named `list_*`, `get_*` or `search_*` is available, along with `search`
 
 **Writing is limited to `create_macro` and `update_macro`.** A macro is a shortcut an agent applies to a ticket by hand, so creating one changes nothing on its own, which is why these two are permitted where nothing else is.
 
-**Everything else is refused.** Creating, updating and deleting a ticket, and creating a user, an organization or a group, are all written and working in the code but never offered to a client, so asking for them will not work. Nothing else writes at all. Deleting a macro, for instance, was never built as a tool. The permitted set is decided in `src/utils/tool-registry.ts`, and the server logs what it withheld each time it starts.
+**Everything else is refused.** Tickets, Help Center articles, triggers, automations, users, organizations and groups all have write tools that are written, tested and never offered to a client, so asking for one will not work. Nothing else writes at all: deleting a macro, for instance, was never built as a tool. The permitted set is decided in `src/utils/tool-registry.ts`, and the server logs what it withheld each time it starts.
+
+Two of those carry a second guardrail that outlives the allowlist. An article this server creates is always a draft, and there is no way to publish one through it at all; a trigger or automation is always created switched off, and turning one on stays a human action in Zendesk. CLAUDE.md sets out why each is shaped that way.
 
 ## How it works
 
