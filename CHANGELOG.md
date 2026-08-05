@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Write tools for macros, triggers, automations, Help Center articles, users, groups, organizations and views (#21, #22, #23, #12). Only the macro pair is published to clients — everything else is defined but withheld by the registration allowlist until somebody publishes it deliberately.
+- Write tools for macros, triggers, automations, Help Center articles, users, groups, organizations and views (#21, #22, #23, #12). Only the macro pair is published to clients; everything else is defined but withheld by the registration allowlist until somebody publishes it deliberately.
 - Compiler-held guardrails on the sharper writes: a trigger, automation or view is always created dormant, an article is always created as a draft that these tools cannot publish or re-audience, and every user this server creates is an end-user (#22, #23, #12).
 - `support_info` asks Zendesk about the account instead of describing the server, and answers only what it was asked for.
 - A test suite over the code that branches, per-file coverage thresholds on the modules that decide something, and a coverage report posted on every pull request (#14, #25, #26).
@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- OAuth state is encoded through UTF-8, so an authorization request carrying non-ASCII text signs in instead of getting a fixed 400 on every attempt (#74). Old-format states and approval cookies keep decoding, permanently — the cookie lives for a year.
+- OAuth state is encoded through UTF-8, so an authorization request carrying non-ASCII text signs in instead of getting a fixed 400 on every attempt (#74). Old-format states and approval cookies keep decoding, permanently, since the cookie lives for a year.
 - A corrupt approval cookie falls through to the consent dialog instead of answering 500 on every `/authorize` until the user clears cookies by hand (#4).
 - A failed write and a failed read are reported as failures instead of hiding inside a response that reads as success (#28, #68).
 - `list_chats` stopped advertising pagination parameters the Chat API never reads (#67).
@@ -44,7 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The consent page checks link schemes when it renders, not only at client registration (#3).
 - Malformed input to the OAuth endpoints answers a fixed 400 instead of a bare 500, and responses are bounded (#64).
 - The CI token that writes pull-request comments is kept out of the job that installs dependencies (#30).
-- Corrects the record on 0.1.0, whose entry below is left as shipped: "Validate endpoint paths to prevent path traversal" listed a control nothing could reach, so removing it lowers no real defence. The place a model-supplied string genuinely becomes syntax — the `search_*` tools concatenating free text into a search expression — is unchanged, and is recorded beside `validateId` in `src/zendesk-client.ts`.
+- Corrects the record on 0.1.0, whose entry below is left as shipped: "Validate endpoint paths to prevent path traversal" listed a control nothing could reach, so removing it lowers no real defence. The place a model-supplied string genuinely becomes syntax, the `search_*` tools concatenating free text into a search expression, is unchanged and recorded beside `validateId` in `src/zendesk-client.ts`.
 
 ## [0.1.0] - 2025-10-16
 
