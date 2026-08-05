@@ -205,6 +205,18 @@ const MINIMUM_ATTEMPT_MS = 1_000
 const MAX_ATTEMPTS = 3
 
 /**
+ * The window a retry may land in after a `Retry-After` wait — somewhere in the second past
+ * the moment Zendesk named, and never a millisecond before it. Asking earlier than agreed
+ * spends more of a quota already exhausted, so the spread only ever adds.
+ *
+ * One second because the header speaks in whole seconds: every caller refused together is
+ * told the same figure, so a spread as wide as the granularity is what separates them
+ * completely. Flat rather than scaled to the wait, because a wider window buys no more
+ * separation and eats more of a deadline the wait itself already dominates.
+ */
+const RETRY_AFTER_SPREAD_MS = 1_000
+
+/**
  * Yields an error and then each `cause` beneath it. `request` rewraps whatever it caught, so
  * the failure worth classifying is usually a link or two down rather than in hand — and fetch
  * itself nests, reporting a socket error as the cause of a bare "fetch failed".
@@ -588,13 +600,18 @@ export class ZendeskClient {
 				// providers commonly extend the penalty for a caller that keeps knocking. The
 				// ladder is the fallback for the responses that say nothing.
 				//
-				// Deliberately not jittered, for the same reason. Jitter is a spread around a
-				// number this client chose, and `Retry-After` is not that — spreading it means
-				// half the callers asking earlier than Zendesk agreed to. The herd argument
-				// above does not apply either: a 429 window resets at one moment for everyone,
-				// so there is no spread that would make arriving before it useful.
+				// Which is why the spread is added after the requested wait rather than around
+				// it. Jitter spreads a number this client chose, and `Retry-After` is not that —
+				// spreading around it would have half the callers asking earlier than Zendesk
+				// agreed to. But a 429 window resets at one moment for everyone it refused, so
+				// callers told the same figure all come back on the same tick, and a synchronised
+				// burst arriving exactly at the reset is itself a way of keeping knocking. The
+				// spread breaks that burst up without ever moving anyone earlier.
 				const requested = retryAfterFrom(error)
-				const delay = requested ?? backoff
+				const delay =
+					requested === undefined
+						? backoff
+						: requested + Math.round(Math.random() * RETRY_AFTER_SPREAD_MS)
 
 				// Decide whether the next attempt fits before sleeping, rather than sleeping and
 				// then discovering it does not. Waiting out a backoff only to send a request the
