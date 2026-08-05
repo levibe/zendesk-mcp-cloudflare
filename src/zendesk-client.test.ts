@@ -1025,20 +1025,47 @@ describe('Retry-After', () => {
 
 	// The ladder would have asked again within a second. Retrying sooner than you were told to
 	// is worse than not retrying: it spends more of a quota already exhausted, and providers
-	// commonly extend the penalty for a caller that keeps knocking.
-	it('is waited out instead of the client running its own ladder', async () => {
-		const fetchMock = stubFetch(async () => rateLimited('5'))
+	// commonly extend the penalty for a caller that keeps knocking. The spread on top answers
+	// the other way of keeping knocking: the header speaks in whole seconds, so every caller
+	// refused together is told the same figure, and without the spread they would all arrive
+	// back in one burst at the reset moment. Pinned at the top of the spread here; the floor
+	// is the test below.
+	it('waits out the requested figure plus a spread instead of running its own ladder', async () => {
+		vi.spyOn(Math, 'random').mockReturnValue(1)
+		const fetchMock = stubFetch(async () => rateLimited('2'))
 
 		const attempt = client.requestWithRetry('GET', '/tickets.json')
 		const rejects = expect(attempt).rejects.toThrow('Zendesk API Error: 429')
 
-		await vi.advanceTimersByTimeAsync(4_999)
+		await vi.advanceTimersByTimeAsync(2_999)
 		expect(fetchMock).toHaveBeenCalledTimes(1)
 
 		await vi.advanceTimersByTimeAsync(1)
 		expect(fetchMock).toHaveBeenCalledTimes(2)
 
-		await vi.advanceTimersByTimeAsync(5_000)
+		await vi.advanceTimersByTimeAsync(3_000)
+		await rejects
+		expect(fetchMock).toHaveBeenCalledTimes(3)
+	})
+
+	// The floor of the spread window, which is the half worth pinning hardest: at its lowest
+	// roll the wait is exactly the figure Zendesk named. The spread only ever adds — a roll
+	// that could land the retry before the reset would be asking earlier than agreed, which
+	// is the thing this path exists to avoid.
+	it('never retries before the moment Zendesk named', async () => {
+		vi.spyOn(Math, 'random').mockReturnValue(0)
+		const fetchMock = stubFetch(async () => rateLimited('2'))
+
+		const attempt = client.requestWithRetry('GET', '/tickets.json')
+		const rejects = expect(attempt).rejects.toThrow('Zendesk API Error: 429')
+
+		await vi.advanceTimersByTimeAsync(1_999)
+		expect(fetchMock).toHaveBeenCalledTimes(1)
+
+		await vi.advanceTimersByTimeAsync(1)
+		expect(fetchMock).toHaveBeenCalledTimes(2)
+
+		await vi.advanceTimersByTimeAsync(2_000)
 		await rejects
 		expect(fetchMock).toHaveBeenCalledTimes(3)
 	})
@@ -1057,11 +1084,30 @@ describe('Retry-After', () => {
 		expect(vi.getTimerCount()).toBe(0)
 	})
 
+	// The spread counts against the deadline the same way the wait it rides on does, because
+	// the fit check reads the delay with the spread already in it. Twenty-nine seconds fits
+	// the budget on its own; with the spread at its widest it does not, and the honest answer
+	// stays the one above — stop and say so rather than sleep into a retry that cannot run.
+	it('counts the spread against the deadline when deciding whether a retry fits', async () => {
+		vi.spyOn(Math, 'random').mockReturnValue(1)
+		const fetchMock = stubFetch(async () => rateLimited('29'))
+
+		await expect(client.requestWithRetry('GET', '/tickets.json')).rejects.toThrow(
+			'Zendesk API Error: 429'
+		)
+
+		expect(fetchMock).toHaveBeenCalledTimes(1)
+		expect(vi.getTimerCount()).toBe(0)
+	})
+
 	// Zendesk sends seconds, but the header is defined as seconds or an HTTP date, and
 	// reading only half of it without saying so is the kind of gap that gets found in
 	// production rather than here.
 	it('understands the date form as well as the seconds form', async () => {
 		vi.setSystemTime(new Date('2026-08-01T12:00:00Z'))
+		// The spread is pinned to its floor because this test is about reading the header
+		// form, and the arithmetic below should be the date's four seconds and nothing else.
+		vi.spyOn(Math, 'random').mockReturnValue(0)
 		const fetchMock = stubFetch(async () => rateLimited('Sat, 01 Aug 2026 12:00:04 GMT'))
 
 		const attempt = client.requestWithRetry('GET', '/tickets.json')
