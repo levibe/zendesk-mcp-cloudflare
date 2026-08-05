@@ -7,9 +7,11 @@ import {
 	ticketStatusSchema,
 	ticketTypeSchema,
 	idSchema,
-	tagsSchema,
+	createTicketSchema,
+	updateTicketSchema,
 } from '../types/zendesk'
 import { createTool } from '../utils/tool-registry'
+import { requireChanges } from '../utils/require-changes'
 import { executeSearchWithStandardizedResponse } from '../utils/search-response'
 
 export const ticketsTools: ToolDefinition[] = [
@@ -36,34 +38,14 @@ export const ticketsTools: ToolDefinition[] = [
 		}
 	),
 
+	// The one reshaping either ticket write does: the schema takes the comment as a string,
+	// because that is what a model has to hand, and Zendesk wants it wrapped as `{ body }`.
 	createTool(
 		'create_ticket',
 		'Create a new ticket',
-		{
-			subject: z.string().describe('Ticket subject'),
-			comment: z.string().describe('Ticket comment/description'),
-			priority: ticketPrioritySchema.optional().describe('Ticket priority'),
-			status: ticketStatusSchema.optional().describe('Ticket status'),
-			requester_id: z.number().optional().describe('User ID of the requester'),
-			assignee_id: z.number().optional().describe('User ID of the assignee'),
-			group_id: z.number().optional().describe('Group ID for the ticket'),
-			type: ticketTypeSchema.optional().describe('Ticket type'),
-			tags: tagsSchema.describe('Tags for the ticket'),
-		},
-		async (client, params) => {
-			const ticketData = {
-				subject: params.subject,
-				comment: { body: params.comment },
-				priority: params.priority,
-				status: params.status,
-				requester_id: params.requester_id,
-				assignee_id: params.assignee_id,
-				group_id: params.group_id,
-				type: params.type,
-				tags: params.tags,
-			}
-
-			return client.createTicket(ticketData)
+		createTicketSchema,
+		async (client, { comment, ...rest }) => {
+			return client.createTicket({ ...rest, comment: { body: comment } })
 		},
 		'Ticket created successfully!'
 	),
@@ -121,31 +103,16 @@ export const ticketsTools: ToolDefinition[] = [
 
 	createTool(
 		'update_ticket',
-		'Update an existing ticket',
-		{
-			id: idSchema.describe('Ticket ID to update'),
-			subject: z.string().optional().describe('Updated ticket subject'),
-			comment: z.string().optional().describe('New comment to add'),
-			priority: ticketPrioritySchema.optional().describe('Updated ticket priority'),
-			status: ticketStatusSchema.optional().describe('Updated ticket status'),
-			assignee_id: z.number().optional().describe('User ID of the new assignee'),
-			group_id: z.number().optional().describe('New group ID for the ticket'),
-			type: ticketTypeSchema.optional().describe('Updated ticket type'),
-			tags: tagsSchema.describe('Updated tags for the ticket'),
-		},
-		async (client, params) => {
-			const ticketData: Record<string, unknown> = {}
+		'Update an existing ticket. Any field left out keeps its current value.',
+		{ id: idSchema.describe('Ticket ID to update'), ...updateTicketSchema },
+		async (client, { id, ...changes }) => {
+			requireChanges('update_ticket', updateTicketSchema, changes)
 
-			if (params.subject !== undefined) ticketData.subject = params.subject
-			if (params.comment !== undefined) ticketData.comment = { body: params.comment }
-			if (params.priority !== undefined) ticketData.priority = params.priority
-			if (params.status !== undefined) ticketData.status = params.status
-			if (params.assignee_id !== undefined) ticketData.assignee_id = params.assignee_id
-			if (params.group_id !== undefined) ticketData.group_id = params.group_id
-			if (params.type !== undefined) ticketData.type = params.type
-			if (params.tags !== undefined) ticketData.tags = params.tags
-
-			return client.updateTicket(params.id, ticketData)
+			const { comment, ...rest } = changes
+			return client.updateTicket(
+				id,
+				comment !== undefined ? { ...rest, comment: { body: comment } } : rest
+			)
 		},
 		'Ticket updated successfully!'
 	),

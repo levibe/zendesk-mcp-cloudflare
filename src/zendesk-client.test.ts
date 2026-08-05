@@ -252,10 +252,12 @@ describe('request', () => {
 	it('serializes the body on a POST', async () => {
 		const fetchMock = stubFetch(async () => jsonResponse({}))
 
-		await client.createTicket({ subject: 'Cannot log in' })
+		await client.createTicket({ subject: 'Cannot log in', comment: { body: 'Help' } })
 
 		expect(sent(fetchMock).method).toBe('POST')
-		expect(sent(fetchMock).body).toBe(JSON.stringify({ ticket: { subject: 'Cannot log in' } }))
+		expect(sent(fetchMock).body).toBe(
+			JSON.stringify({ ticket: { subject: 'Cannot log in', comment: { body: 'Help' } } })
+		)
 	})
 
 	it('answers a response that is not JSON with a bare success', async () => {
@@ -949,7 +951,7 @@ describe('the per-verb retry policy', () => {
 		return fetchMock.mock.calls.length
 	}
 
-	const aWrite = () => client.createTicket({ subject: 'hi' })
+	const aWrite = () => client.createTicket({ subject: 'hi', comment: { body: 'hi' } })
 	const aRead = () => client.listTickets()
 
 	// The two that mean the request was refused before anything happened. A rate limit is
@@ -984,9 +986,9 @@ describe('the per-verb retry policy', () => {
 		it('sends a write exactly once', async () => {
 			const fetchMock = dropped()
 
-			const rejects = expect(client.createTicket({ subject: 'hi' })).rejects.toThrow(
-				'Zendesk request failed'
-			)
+			const rejects = expect(
+				client.createTicket({ subject: 'hi', comment: { body: 'hi' } })
+			).rejects.toThrow('Zendesk request failed')
 			await drainBackoff()
 			await rejects
 

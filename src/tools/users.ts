@@ -5,10 +5,11 @@ import {
 	sortingSchema,
 	userRoleSchema,
 	idSchema,
-	nameSchema,
-	emailSchema,
+	createUserSchema,
+	updateUserSchema,
 } from '../types/zendesk'
 import { createTool } from '../utils/tool-registry'
+import { requireChanges } from '../utils/require-changes'
 import { executeSearchWithStandardizedResponse } from '../utils/search-response'
 
 export const usersTools: ToolDefinition[] = [
@@ -35,30 +36,30 @@ export const usersTools: ToolDefinition[] = [
 		}
 	),
 
+	// Withheld by `WRITE_TOOLS_ENABLED` in utils/tool-registry, like every write below that is
+	// not named there. Who a user is — their email, verified state and organization — is
+	// settable at creation only, and every account this server creates is an end-user; see
+	// `createUserSchema` for both arguments.
 	createTool(
 		'create_user',
-		'Create a new user',
-		{
-			name: nameSchema.describe('User name'),
-			email: emailSchema.describe('User email'),
-			role: userRoleSchema.optional().describe('User role'),
-			verified: z.boolean().optional().describe('Whether the user is verified'),
-			phone: z.string().optional().describe('User phone number'),
-			organization_id: z.number().optional().describe('Organization ID'),
-		},
+		'Create a new end-user — a customer tickets can be filed for. Agent and admin accounts stay a human action in the Zendesk UI.',
+		createUserSchema,
 		async (client, params) => {
-			const userData = {
-				name: params.name,
-				email: params.email,
-				role: params.role,
-				verified: params.verified,
-				phone: params.phone,
-				organization_id: params.organization_id,
-			}
-
-			return client.createUser(userData)
+			return client.createUser({ ...params, role: 'end-user' })
 		},
 		'User created successfully!'
+	),
+
+	createTool(
+		'update_user',
+		"Update an existing user's profile fields — their name or phone. This cannot change a user's email, role, verified state or organization — email, verified state and organization are set at creation, and role stays managed in the Zendesk UI.",
+		{ id: idSchema.describe('User ID to update'), ...updateUserSchema },
+		async (client, { id, ...changes }) => {
+			requireChanges('update_user', updateUserSchema, changes)
+
+			return client.updateUser(id, changes)
+		},
+		'User updated successfully!'
 	),
 
 	createTool(
