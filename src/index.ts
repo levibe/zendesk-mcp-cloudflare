@@ -68,5 +68,30 @@ export default new OAuthProvider({
 	authorizeEndpoint: '/authorize',
 	clientRegistrationEndpoint: '/register',
 	defaultHandler: GoogleHandler,
+	// Four hundred days, and it exists only to stay out of the way of the grant below. A grant is
+	// swept once the client it was issued against is gone, and this TTL is stamped at
+	// registration and never rolls forward on use, so whichever of the two is shorter is what
+	// actually bounds a session. Left at its ninety-day default it would end every session at
+	// ninety days no matter what the grant said — the same outage, arriving from the side nobody
+	// was looking at.
+	//
+	// The thirty-five days of headroom over the grant is sized to how clients are actually
+	// minted rather than to anything in the spec: a connector registers a fresh client each time
+	// it connects, so a client and the grant issued against it are minutes apart in practice.
+	// The cushion covers that gap. It would not cover a client reused for a new grant a year
+	// later, which is worth re-deriving rather than assuming if a client ever starts being
+	// long-lived.
+	clientRegistrationTTL: 34_560_000,
+	// A year. Thirty days was a library default nobody chose, and this is the deliberate number.
+	//
+	// It has to expire at all, which is the part worth defending, because `undefined` reads like
+	// the obvious simplification. This is the only revocation there is. Every Zendesk call goes
+	// out under one shared service account, so a grant is a bearer credential for the whole
+	// published tool surface rather than for one person's own access, and nothing re-checks
+	// Google once it has been issued — no `tokenExchangeCallback` is configured, so disabling
+	// somebody's Google account does not reach a grant they already hold. A year is therefore
+	// also the window a departed colleague keeps full access for, which is the cost this number
+	// buys and the thing #20 is what actually fixes.
+	refreshTokenTTL: 31_536_000,
 	tokenEndpoint: '/token',
 })
