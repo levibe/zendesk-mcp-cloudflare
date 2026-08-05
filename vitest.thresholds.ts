@@ -17,7 +17,7 @@
  *
  * Which metrics each module pins, and why:
  *
- * - Two of the utils and the OAuth handler are wholly covered, so they pin all
+ * - Most of the utils and the OAuth handler are wholly covered, so they pin all
  *   four. Any drop is a regression rather than a rounding artefact. The search
  *   response helper is the exception: it pins the other three at 100 and holds
  *   branches lower, because its reshaping has arms no fixture has reached yet.
@@ -32,6 +32,15 @@
  * you lower one, because that is coverage being given up.
  */
 export const coverageThresholds = {
+	// The decode helper decides — try the bytes as UTF-8, fall back to the legacy format —
+	// and the fallback is what keeps year-old approval cookies readable, so losing its test
+	// would be losing the rollout guarantee, not a number.
+	'src/utils/base64.ts': {
+		statements: 100,
+		branches: 100,
+		functions: 100,
+		lines: 100,
+	},
 	'src/utils/error-handling.ts': {
 		statements: 100,
 		branches: 100,

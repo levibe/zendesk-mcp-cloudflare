@@ -2,6 +2,7 @@ import type { AuthRequest, OAuthHelpers } from '@cloudflare/workers-oauth-provid
 import { type Context, Hono } from 'hono'
 import { getCookie } from 'hono/cookie'
 import { fetchUpstreamAuthToken, getUpstreamAuthorizeUrl, type Props } from './utils'
+import { decodeBase64Json, encodeBase64Json } from './utils/base64'
 import { isRecord } from './utils/narrow'
 import {
 	clientIdAlreadyApproved,
@@ -123,22 +124,17 @@ async function redirectToGoogle(
 	oauthReqInfo: AuthRequest,
 	headers: Record<string, string> = {}
 ) {
-	// `btoa` refuses any code point above U+00FF, and this is the one place a caller's own text
-	// reaches it. On POST /authorize the object below comes straight out of the form body, and
-	// nothing upstream inspects it beyond requiring a truthy `clientId`.
+	// The state is minted through encodeBase64Json, which goes through UTF-8, so a caller's own
+	// text survives the trip whatever characters it carries. That matters here because this is
+	// the one place that text reaches the encoding: OAuth `state` is opaque client data, and on
+	// POST /authorize the object below comes straight out of the form body, with nothing
+	// upstream inspecting it beyond requiring a truthy `clientId`.
 	//
-	// It slips past every check in front of it, which is why it is worth naming rather than
-	// leaving to be rediscovered. A JSON `Ā` escape is pure ASCII on the wire, so the
-	// caller's own base64 is valid and `decodeState` parses it into a string holding a real
-	// U+0100. The approval cookie carries only the clientId, so keeping that ASCII and putting
-	// the character in any other field clears that too. Then this line throws, and an uncaught
-	// throw here is a bare 500 anyone can produce with one form field and no sign-in at all.
-	//
-	// Caught at the mint site rather than fixed at the root, deliberately. Making the encoding
-	// UTF-8 safe is the better answer, but this `btoa` is one half of a pair — what it writes is
-	// read back in /callback, and `renderApprovalDialog` and `parseRedirectApproval` are a second
-	// pair in the vendored file — so the two halves have to move together or a state minted
-	// before the change stops decoding after it. That is worth doing on its own, not in passing.
+	// The guard stays as a backstop rather than the control it once was. Encoding can still
+	// throw in principle — JSON.stringify refuses a value it cannot serialize — and nothing that
+	// decoded from a form can produce one, but that certainty is exactly what a backstop exists
+	// not to lean on: an uncaught throw here is a bare 500 anyone could probe for with one form
+	// field and no sign-in at all.
 	// The nonce is what makes the state belong to this browser. It goes into the state Google
 	// hands back and into a cookie only this browser holds, and `/callback` requires the two to
 	// agree — so a state minted somewhere else no longer completes a flow here.
@@ -151,7 +147,7 @@ async function redirectToGoogle(
 
 	let state: string
 	try {
-		state = btoa(JSON.stringify({ ...oauthReqInfo, nonce }))
+		state = encodeBase64Json({ ...oauthReqInfo, nonce })
 	} catch (error) {
 		console.warn('The authorization request could not be encoded as state:', reasonFor(error))
 		return c.text('Invalid request', 400)
@@ -206,9 +202,9 @@ app.get('/callback', async (c) => {
 	// used from a browser other than the one it was minted for.
 	//
 	// Everything below arrived through the user's browser and none of it can be assumed
-	// well-formed. `state` may be absent, `atob` throws on anything outside the base64 alphabet,
-	// and `JSON.parse` throws on anything that is not JSON — on a public, unauthenticated endpoint
-	// all three used to be a bare 500 that anyone could produce at will. Handled the way GET
+	// well-formed. `state` may be absent, and `decodeBase64Json` throws on anything that is not
+	// base64 or does not parse as JSON — on a public, unauthenticated endpoint all three used to
+	// be a bare 500 that anyone could produce at will. Handled the way GET
 	// /authorize handles parseAuthRequest above, and for the same reason: the real cause goes to
 	// the log, and the unauthenticated caller gets one fixed message that does not tell it which
 	// step it managed to break.
@@ -219,7 +215,7 @@ app.get('/callback', async (c) => {
 
 	let decodedState: unknown
 	try {
-		decodedState = JSON.parse(atob(encodedState))
+		decodedState = decodeBase64Json(encodedState)
 	} catch (error) {
 		console.warn('Callback state could not be decoded:', reasonFor(error))
 		return c.text('Invalid state', 400)
