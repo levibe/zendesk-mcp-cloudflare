@@ -7,6 +7,7 @@ import { executeSearchWithStandardizedResponse } from '../utils/search-response'
 export const searchTools: ToolDefinition[] = [
 	createTool(
 		'search',
+		'read',
 		'Search tickets, users, organizations and other Zendesk content',
 		{
 			query: z.string().describe('Search query string (e.g., "urgent ticket", "user@example.com")'),

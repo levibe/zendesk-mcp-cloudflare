@@ -2,55 +2,38 @@ import type { McpServer } from '@modelcontextprotocol/server'
 import { z, type ZodRawShape } from 'zod'
 import type { ZendeskClient } from '../zendesk-client'
 import type { InferParams, ToolDefinition } from '../types/zendesk'
+import { isWithinCeiling, type DeclarableLevel, type ResolvedCeilings } from './tool-ceilings'
 import { withErrorHandling } from './error-handling'
 
 /**
- * Reads are published. Anything that creates, updates or deletes is withheld at registration
- * and never reaches a client's tool list, unless it is named in WRITE_TOOLS_ENABLED below.
- *
- * This is an allowlist of query verbs rather than a denylist of mutating ones, so a
- * newly added tool stays unexposed until someone classifies it on purpose. Getting that
- * backwards would silently publish the next write tool somebody adds.
+ * The backstop for a group the ceilings never named: fail closed to `read`. Registration and
+ * the announcement both go through this one expression, so the log can never claim more or
+ * less than registration actually does.
  */
-const READ_ONLY_TOOL_PREFIXES = ['list_', 'get_', 'search_']
-const READ_ONLY_TOOL_NAMES = new Set(['search', 'support_info'])
-
-export const isReadOnlyTool = (name: string): boolean =>
-	READ_ONLY_TOOL_NAMES.has(name) ||
-	READ_ONLY_TOOL_PREFIXES.some((prefix) => name.startsWith(prefix))
+const ceilingFor = (ceilings: ResolvedCeilings['ceilings'], group: string): DeclarableLevel =>
+	ceilings[group] ?? 'read'
 
 /**
- * The writes that are permitted anyway, named one at a time.
+ * Registers the tools the ceiling permits, returning the names of those it withheld.
  *
- * Macros are the whole list because of what a macro is: it changes nothing when it is
- * created and sits in a menu until an agent deliberately applies it to a ticket. A trigger
- * fires on every matching create or update and an automation runs on a schedule, so a
- * malformed one reaches customers before anyone reviews it. That is the difference this set
- * is drawing, and it is why #22 files triggers and automations separately.
- *
- * Naming the tools individually is the point, rather than permitting a `create_` prefix
- * alongside the read verbs above. A prefix would auto-publish every create tool anyone adds
- * from now on, which inverts exactly the property the read rule is protecting. `delete_macro`
- * is simply absent, so deletion stays withheld without needing a tier system to say so.
- *
- * Generalising this — per-group ceilings, levels declared on the tool, config in `this.env`
- * — is #20, which waits until #22 and #23 have said what the general case actually needs.
+ * Publication is a comparison of data — the tool's declared level against the group's
+ * configured ceiling — and deliberately nothing cleverer. The name plays no part, so a
+ * `create_` prefix publishes nothing by itself; and because both sides are runtime values,
+ * a withheld tool is ordinary reachable code to the compiler and the linter, not a branch
+ * they can prove dead. Registration is still the security boundary it always was: a tool
+ * withheld here cannot be called by any client, whatever the tool list a client cached
+ * happens to say.
  */
-const WRITE_TOOLS_ENABLED = new Set(['create_macro', 'update_macro'])
-
-export const isToolPublished = (name: string): boolean =>
-	isReadOnlyTool(name) || WRITE_TOOLS_ENABLED.has(name)
-
-/** Registers the tools this policy publishes, returning the names of those it withheld. */
 export const registerTools = (
 	server: McpServer,
 	client: ZendeskClient,
-	tools: ToolDefinition[]
+	tools: ToolDefinition[],
+	ceiling: DeclarableLevel
 ): string[] => {
 	const withheld: string[] = []
 
 	tools.forEach((tool) => {
-		if (!isToolPublished(tool.name)) {
+		if (!isWithinCeiling(tool.level, ceiling)) {
 			withheld.push(tool.name)
 			return
 		}
@@ -74,46 +57,79 @@ export const registerTools = (
 }
 
 /**
- * Registers multiple tool categories at once, returning every name it withheld
+ * Registers every tool category against its own ceiling, returning every name it withheld.
+ *
+ * A group the config never named falls closed to `read`. The config schema requires every
+ * group, so this only happens when a new category lands in `toolCategories` before the
+ * shipped `TOOL_CEILINGS` names it — the config test fails `validate` on exactly that drift,
+ * and this fallback is the runtime backstop, not the mechanism.
+ *
+ * Registration stays one walk over `toolCategories` in declaration order. The deterministic
+ * tool list the `tools/list` cache reasoning leans on falls out of that, so do not regroup
+ * this by level or ceiling.
  */
 export const registerAllTools = (
 	server: McpServer,
 	client: ZendeskClient,
-	toolCategories: Record<string, ToolDefinition[]>
+	toolCategories: Record<string, ToolDefinition[]>,
+	ceilings: ResolvedCeilings['ceilings']
 ): string[] =>
-	Object.values(toolCategories).flatMap((tools) => registerTools(server, client, tools))
+	Object.entries(toolCategories).flatMap(([group, tools]) =>
+		registerTools(server, client, tools, ceilingFor(ceilings, group))
+	)
 
 /**
- * Says once what registration will withhold, and what it lets through anyway.
+ * Says once per isolate what each group's ceiling is and what those ceilings withhold, so a
+ * misconfiguration is visible in the log without reading code.
  *
- * Deliberately separate from `registerAllTools`, and deliberately derived from the tool
- * definitions rather than from a registration that has just run. Since #40 the server is
- * built per request, so a message logged as a side effect of registering would repeat on
- * every tool call instead of appearing once. What gets withheld is fixed at build time and
- * depends on nothing per-request, which is why this can be called at module scope and read
- * as the startup announcement it is meant to be.
+ * The ceilings come from `env`, which module scope never sees on Workers, so this cannot be
+ * the startup announcement it used to be — the caller invokes it from inside `fetch` behind a
+ * once-flag instead. It stays a pure function of its arguments, and deliberately separate
+ * from registration: since #40 the server is rebuilt per request, so a message logged as a
+ * side effect of registering would repeat on every tool call.
+ *
+ * A refused config is reported through `console.error`, and loudly, because fail-closed is
+ * otherwise silent in production: the deploy succeeds and the write tools just vanish. This
+ * log line is the only symptom there is.
  */
-export const announceWithheldTools = (toolCategories: Record<string, ToolDefinition[]>): void => {
-	const withheld = Object.values(toolCategories)
-		.flat()
-		.map((tool) => tool.name)
-		.filter((name) => !isToolPublished(name))
-
-	if (withheld.length > 0) {
-		console.log(
-			`Withholding ${withheld.length} write tools (${withheld.join(', ')}). ` +
-				`Permitted writes: ${[...WRITE_TOOLS_ENABLED].join(', ')}`
-		)
+export const announceWithheldTools = (
+	toolCategories: Record<string, ToolDefinition[]>,
+	resolved: ResolvedCeilings
+): void => {
+	if (resolved.error) {
+		console.error(`TOOL_CEILINGS refused (${resolved.error}); every group falls closed to read`)
 	}
+
+	const ceilingsNamed = Object.entries(resolved.ceilings)
+		.map(([group, ceiling]) => `${group}=${ceiling}`)
+		.join(', ')
+
+	const withheld = Object.entries(toolCategories).flatMap(([group, tools]) =>
+		tools
+			.filter((tool) => !isWithinCeiling(tool.level, ceilingFor(resolved.ceilings, group)))
+			.map((tool) => tool.name)
+	)
+
+	const withholding =
+		withheld.length > 0
+			? `Withholding ${withheld.length} tools (${withheld.join(', ')})`
+			: 'Withholding nothing'
+
+	console.log(`Tool ceilings: ${ceilingsNamed}. ${withholding}`)
 }
 
 /**
  * Creates a tool definition, deriving the handler's parameters from the schema.
  *
+ * `level` is the tool's declared reach, and declaring it is a deliberate act of
+ * classification — see `tool-ceilings.ts` for the vocabulary and `ToolDefinition` for why
+ * there is no default. The type only admits the declarable subset, so `activate` is not a
+ * value a tool can even attempt.
+ *
  * The handler never restates its parameter type — it is inferred from `schema`, so the two
  * cannot drift apart. Adding a field to a shared schema immediately makes that field visible
  * to every handler spreading it, and naming a field the schema does not declare is now an
- * error rather than a parameter the MCP server will never populate.
+ * error rather than a parameter the server will never populate.
  *
  * The cast is the one place the specific parameter type is given up, and it is safe precisely
  * here: the compiler has just checked `handler` against `schema` for this call, and the MCP
@@ -127,12 +143,14 @@ export const announceWithheldTools = (toolCategories: Record<string, ToolDefinit
  */
 export const createTool = <S extends ZodRawShape>(
 	name: string,
+	level: DeclarableLevel,
 	description: string,
 	schema: S,
 	handler: (client: ZendeskClient, params: InferParams<S>) => Promise<unknown>,
 	successMessage?: string
 ): ToolDefinition => ({
 	name,
+	level,
 	description,
 	schema,
 	handler: handler as ToolDefinition['handler'],

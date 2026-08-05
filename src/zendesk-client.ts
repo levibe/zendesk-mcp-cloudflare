@@ -960,7 +960,8 @@ export class ZendeskClient {
 
 	// Nothing here creates, updates or deletes a category or a section. Six commented-out
 	// methods used to say so under a "DISABLED FOR SECURITY" label, which read as though the
-	// comment were the control; the allowlists in src/utils/tool-registry.ts are.
+	// comment were the control; the ceilings gating registration in src/utils/tool-registry.ts
+	// are.
 
 	// Sections
 	async listSections(params?: Record<string, unknown>) {

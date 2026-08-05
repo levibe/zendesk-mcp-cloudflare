@@ -16,7 +16,7 @@ export const chatTools: ToolDefinition[] = [
 	 * and giving Chat a shape built on the parameters it really takes needs someone to confirm
 	 * what those are against the live API first — which is why this stops at removing the lie.
 	 */
-	createTool('list_chats', 'List Zendesk Chat conversations', {}, async (client) => {
+	createTool('list_chats', 'read', 'List Zendesk Chat conversations', {}, async (client) => {
 		return client.listChats()
 	}),
 ]

@@ -259,6 +259,7 @@ const sourceLocaleOf = (articleResponse: unknown): string => {
 export const helpCenterTools: ToolDefinition[] = [
 	createTool(
 		'list_articles',
+		'read',
 		'List Help Center articles',
 		{
 			...paginationSchema,
@@ -271,6 +272,7 @@ export const helpCenterTools: ToolDefinition[] = [
 
 	createTool(
 		'get_article',
+		'read',
 		'Get a specific Help Center article by ID',
 		{ id: idSchema.describe('Article ID') },
 		async (client, { id }) => {
@@ -280,6 +282,7 @@ export const helpCenterTools: ToolDefinition[] = [
 
 	createTool(
 		'search_articles',
+		'read',
 		'Search knowledge base articles and help content',
 		{
 			query: z.string().describe('Search query for articles (e.g., "password reset", "billing")'),
@@ -296,6 +299,7 @@ export const helpCenterTools: ToolDefinition[] = [
 
 	createTool(
 		'list_categories',
+		'read',
 		'List Help Center categories to understand content hierarchy',
 		{
 			...paginationSchema,
@@ -308,6 +312,7 @@ export const helpCenterTools: ToolDefinition[] = [
 
 	createTool(
 		'get_category',
+		'read',
 		'Get a specific Help Center category by ID',
 		{ id: idSchema.describe('Category ID') },
 		async (client, { id }) => {
@@ -317,6 +322,7 @@ export const helpCenterTools: ToolDefinition[] = [
 
 	createTool(
 		'search_categories',
+		'read',
 		'Search Help Center categories to explore content organization',
 		{
 			query: z.string().describe('Search query for categories (e.g., "billing", "technical")'),
@@ -336,6 +342,7 @@ export const helpCenterTools: ToolDefinition[] = [
 
 	createTool(
 		'list_sections',
+		'read',
 		'List Help Center sections (optionally filtered by category)',
 		{
 			category_id: z.number().optional().describe('Filter sections by category ID'),
@@ -353,6 +360,7 @@ export const helpCenterTools: ToolDefinition[] = [
 
 	createTool(
 		'get_section',
+		'read',
 		'Get a specific Help Center section by ID',
 		{ id: idSchema.describe('Section ID') },
 		async (client, { id }) => {
@@ -362,6 +370,7 @@ export const helpCenterTools: ToolDefinition[] = [
 
 	createTool(
 		'search_sections',
+		'read',
 		'Search Help Center sections to find specific content areas',
 		{
 			query: z
@@ -389,6 +398,7 @@ export const helpCenterTools: ToolDefinition[] = [
 
 	createTool(
 		'get_help_center_hierarchy',
+		'read',
 		'Get the Help Center content hierarchy (categories > sections > articles). The walk is ' +
 			'bounded, so a large Help Center comes back partial with truncated set to true — pass ' +
 			'category_id to narrow it.',
@@ -481,6 +491,7 @@ export const helpCenterTools: ToolDefinition[] = [
 
 	createTool(
 		'list_articles_by_section',
+		'read',
 		'List articles within a specific Help Center section',
 		{
 			section_id: idSchema.describe('Section ID'),
@@ -493,13 +504,16 @@ export const helpCenterTools: ToolDefinition[] = [
 		}
 	),
 
-	// The two writes, which `WRITE_TOOLS_ENABLED` in utils/tool-registry deliberately does not
-	// name, so no client is offered them yet. An article is the only thing these tools can build
-	// that a customer reads directly rather than an agent, and the draft flag is what makes that
-	// safe: a draft is invisible to end users, `create_article` forces one, and neither tool can
-	// publish. See `createArticleSchema` for the rest of that argument.
+	// The two writes, withheld while the helpCenter ceiling ships at `read`, so no client is
+	// offered them yet. An article is the only thing these tools can build that a customer
+	// reads directly rather than an agent. `create_article` declares `stage` because it forces
+	// the draft flag, and a draft is invisible to end users; `update_article` declares `write`
+	// because its target may be an article a human has published, whose body customers are
+	// reading. Neither tool can publish — see `createArticleSchema` for the rest of that
+	// argument.
 	createTool(
 		'create_article',
+		'stage',
 		'Create a Help Center article inside a section. It is created as a draft, so no customer can see it until a human publishes it from the Zendesk UI.',
 		{
 			section_id: idSchema.describe('ID of the section to create the article in'),
@@ -513,6 +527,7 @@ export const helpCenterTools: ToolDefinition[] = [
 
 	createTool(
 		'update_article',
+		'write',
 		"Update a Help Center article's content. Title and body edits apply to the article's source-language translation. Any field left out keeps its current value. This cannot publish a draft, and cannot change who is allowed to see the article.",
 		{ id: idSchema.describe('Article ID to update'), ...updateArticleSchema },
 		async (client, { id, ...changes }) => {

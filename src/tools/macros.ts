@@ -1,7 +1,8 @@
 /**
- * These two writes are the first any client is offered. `WRITE_TOOLS_ENABLED` in
- * utils/tool-registry is where that decision lives, and says why a macro is safe to publish
- * when a trigger and an automation are not.
+ * These two writes are the first any client is offered: macros is the one group whose shipped
+ * ceiling in wrangler.jsonc is `stage` rather than `read`. A macro is inert by nature — it
+ * changes nothing when created and sits in a menu until an agent deliberately applies it — so
+ * `stage` is its honest level, where a trigger is only inert because its schema forces it.
  */
 
 import type { ToolDefinition } from '../types/zendesk'
@@ -10,12 +11,19 @@ import { createTool } from '../utils/tool-registry'
 import { requireChanges } from '../utils/require-changes'
 
 export const macrosTools: ToolDefinition[] = [
-	createTool('list_macros', 'List macros in Zendesk', paginationSchema, async (client, params) => {
-		return client.listMacros(params)
-	}),
+	createTool(
+		'list_macros',
+		'read',
+		'List macros in Zendesk',
+		paginationSchema,
+		async (client, params) => {
+			return client.listMacros(params)
+		}
+	),
 
 	createTool(
 		'get_macro',
+		'read',
 		'Get a specific macro by ID',
 		{ id: idSchema.describe('Macro ID') },
 		async (client, { id }) => {
@@ -25,6 +33,7 @@ export const macrosTools: ToolDefinition[] = [
 
 	createTool(
 		'create_macro',
+		'stage',
 		'Create a new macro',
 		createMacroSchema,
 		async (client, params) => {
@@ -35,6 +44,7 @@ export const macrosTools: ToolDefinition[] = [
 
 	createTool(
 		'update_macro',
+		'stage',
 		'Update an existing macro. Any field left out keeps its current value, except that sending actions replaces the entire action list rather than adding to it.',
 		{ id: idSchema.describe('Macro ID to update'), ...updateMacroSchema },
 		async (client, { id, ...changes }) => {

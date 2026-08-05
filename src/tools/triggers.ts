@@ -1,11 +1,13 @@
 /**
- * A trigger fires on its own, on every ticket create and update that matches it, so these two
- * writes are the ones `WRITE_TOOLS_ENABLED` in utils/tool-registry deliberately does not name.
- * They are defined, type-checked and tested, and no client is offered them.
+ * A trigger fires on its own, on every ticket create and update that matches it, so both
+ * writes ship withheld under the `read` ceiling until raising it is somebody's deliberate
+ * decision. They are defined, type-checked and tested, and no client is offered them.
  *
- * What makes them safe to build ahead of that decision is that neither can produce a rule that
- * acts. Creation forces `active: false` and no shape here accepts `active`, so every trigger
- * these tools can build is dormant until a human enables it in the Zendesk UI.
+ * They declare different levels, and the split is the vocabulary working as intended.
+ * `create_trigger` is `stage`: creation forces `active: false` and no shape here accepts
+ * `active`, so every rule it can build is dormant until a human enables it in the Zendesk UI.
+ * `update_trigger` is `write`: its target may be a rule a human has already enabled, and
+ * rewriting an active trigger's conditions changes what fires on live tickets immediately.
  */
 
 import type { ToolDefinition } from '../types/zendesk'
@@ -21,6 +23,7 @@ import { requireChanges } from '../utils/require-changes'
 export const triggersTools: ToolDefinition[] = [
 	createTool(
 		'list_triggers',
+		'read',
 		'List triggers in Zendesk',
 		paginationSchema,
 		async (client, params) => {
@@ -30,6 +33,7 @@ export const triggersTools: ToolDefinition[] = [
 
 	createTool(
 		'get_trigger',
+		'read',
 		'Get a specific trigger by ID',
 		{ id: idSchema.describe('Trigger ID') },
 		async (client, { id }) => {
@@ -39,6 +43,7 @@ export const triggersTools: ToolDefinition[] = [
 
 	createTool(
 		'create_trigger',
+		'stage',
 		'Create a new trigger. It is created inactive and fires nothing until someone enables it in the Zendesk UI, and it cannot carry notification actions.',
 		createTriggerSchema,
 		async (client, params) => {
@@ -49,6 +54,7 @@ export const triggersTools: ToolDefinition[] = [
 
 	createTool(
 		'update_trigger',
+		'write',
 		'Update an existing trigger. Any field left out keeps its current value, except that sending conditions or actions replaces that whole set rather than adding to it. This cannot enable or disable a trigger.',
 		{ id: idSchema.describe('Trigger ID to update'), ...updateTriggerSchema },
 		async (client, { id, ...changes }) => {
