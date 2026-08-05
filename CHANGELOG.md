@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MCP is served over Streamable HTTP at `/mcp` (#1).
 - The retry policy was rebuilt around one deadline per call and what the response said: the HTTP verb decides what may retry, failures classify on status alone, and a `Retry-After` is waited out in full with up to a second of spread added after it, never before (#17, #29, #54, #56, #58, #78).
 - Redirects are no longer followed: the platform strips `Authorization` on a cross-host hop, so a 3xx fails naming where it pointed instead of surfacing as a misleading 401 (#39).
+- OAuth refresh grants live for a year, and client registrations are kept longer still, so a grant never outlives the client it was issued against (#88).
 - `no-explicit-any` is enforced at error, with the vendored OAuth file quarantined; the read path returns `unknown` for callers to narrow, and every write payload derives from its tool's own Zod schema (#8, #11, #12, #13).
 - The toolchain is pinned: pnpm via `packageManager`, Prettier owning formatting, current Cloudflare runtime and Wrangler (#2, #5).
 
