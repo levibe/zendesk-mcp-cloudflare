@@ -138,17 +138,21 @@ export type TicketUpdatePayload = Omit<InferParams<typeof updateTicketSchema>, '
 /**
  * The user writes, where the update shape is deliberately much narrower than the create.
  *
- * `email`, `role` and `verified` are settable at creation only. Role decides what a user may
- * do, email decides where their notifications and password resets go, and verified asserts an
- * identity check that this server has no way to have performed on an existing account.
- * Creating a user states all three about an account that did not exist a moment ago;
- * rewriting them on someone's live account is the change that hands the account to somebody
- * else, so all three stay human actions in the Zendesk UI.
+ * `email` and `verified` are settable at creation only. Email decides where the account's
+ * notifications and password resets go, and verified asserts an identity check that this
+ * server has no way to have performed on an existing account. Creating a user states both
+ * about an account that did not exist a moment ago; rewriting them on someone's live account
+ * is the change that hands the account to somebody else, so both stay human actions in the
+ * Zendesk UI.
  *
- * `role` refuses `admin` outright, at creation too, on the guardrail pattern the notification
- * actions set: the schema turns away what these tools must never build, independent of
- * whether the tool is published. An admin account with a caller-chosen email is a takeover in
- * one call — the password reset goes wherever the email points — so minting one stays human.
+ * `role` is not accepted at all: every user this server creates is an end-user, held the way
+ * the business rule payloads hold `active: false` — the schema never takes the field, so the
+ * role can only come from the handler, and `UserCreatePayload` makes forgetting it a compile
+ * error. A privileged account at a caller-chosen email is a takeover in one call — the
+ * password reset goes wherever the email points — and an agent already reads every ticket in
+ * the instance, so the argument that refuses `admin` refuses `agent` with it. Minting either
+ * stays a human action in the Zendesk UI until #20's permission model gives the distinction
+ * somewhere to live.
  *
  * `organization_id` is create-only for the reason `domain_names` is on an organization:
  * membership can carry shared ticket visibility, so moving a user into an organization is a
@@ -158,12 +162,6 @@ export type TicketUpdatePayload = Omit<InferParams<typeof updateTicketSchema>, '
 export const createUserSchema = {
 	name: nameSchema.describe('User name'),
 	email: emailSchema.describe('User email'),
-	role: z
-		.enum(['end-user', 'agent'])
-		.optional()
-		.describe(
-			'User role. Only end-user and agent can be created here — creating an admin stays a human action in the Zendesk UI'
-		),
 	verified: z.boolean().optional().describe('Whether the user is verified'),
 	phone: z.string().optional().describe('User phone number'),
 	organization_id: z.number().optional().describe('Organization ID'),
@@ -208,7 +206,7 @@ export const updateGroupSchema = {
 	description: descriptionSchema.describe('Updated group description'),
 }
 
-export type UserCreatePayload = InferParams<typeof createUserSchema>
+export type UserCreatePayload = InferParams<typeof createUserSchema> & { role: 'end-user' }
 export type UserUpdatePayload = InferParams<typeof updateUserSchema>
 export type OrganizationCreatePayload = InferParams<typeof createOrganizationSchema>
 export type OrganizationUpdatePayload = InferParams<typeof updateOrganizationSchema>

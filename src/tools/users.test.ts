@@ -1,26 +1,29 @@
 /**
  * What these pin is the gap between the two user shapes: creation states who a user is, and
  * the update deliberately cannot restate it. `email` decides where the account's mail goes,
- * `role` decides what it may do, `verified` asserts a check this server never performed, and
- * `organization_id` decides what shared tickets they may see — so all four are settable at
- * creation only, and an update that smuggles one in loses it at validation rather than
- * rewriting somebody's account. Creation itself refuses `admin`, since an admin account with
- * a caller-chosen email is a takeover in one call.
+ * `verified` asserts a check this server never performed, and `organization_id` decides what
+ * shared tickets they may see — so all three are settable at creation only, and an update
+ * that smuggles one in loses it at validation rather than rewriting somebody's account.
+ * `role` is held harder still: neither shape accepts it, and the create handler pins every
+ * account it makes to `end-user`, since a privileged account at a caller-chosen email is a
+ * takeover in one call.
  */
 
 import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import { usersTools } from './users'
 import { createUserSchema, updateUserSchema } from '../types/zendesk'
-import type { UserUpdatePayload } from '../types/zendesk'
+import type { UserCreatePayload, UserUpdatePayload } from '../types/zendesk'
 import type { ZendeskClient } from '../zendesk-client'
 
+const createUser = usersTools.find((tool) => tool.name === 'create_user')!
 const updateUser = usersTools.find((tool) => tool.name === 'update_user')!
 
 const createPayload = z.object(createUserSchema)
 const updatePayload = z.object(updateUserSchema)
 
 const stubClient = (user: unknown = { user: { id: 1 } }) => ({
+	createUser: vi.fn(async (_data: UserCreatePayload) => user),
 	updateUser: vi.fn(async (_id: number, _data: UserUpdatePayload) => user),
 })
 
@@ -46,19 +49,34 @@ describe('the user schemas', () => {
 		}
 	)
 
-	// Refused rather than stripped, because it arrives through a field the shape does accept.
-	// An admin account with a caller-chosen email is a takeover in one call — the password
-	// reset goes wherever the email points — so minting one stays a human action.
-	it('creation refuses the admin role outright', () => {
-		const user = { name: 'Ada', email: 'ada@example.com', role: 'admin' }
+	// The create shape refuses `role` the same way: a caller stating one loses it at
+	// validation, whatever they asked for.
+	it.each(['admin', 'agent', 'end-user'])(
+		'creation does not accept a caller-chosen role (%s)',
+		(role) => {
+			const user = { name: 'Ada', email: 'ada@example.com', role }
 
-		expect(createPayload.safeParse(user).success).toBe(false)
-	})
+			expect(createPayload.parse(user)).not.toHaveProperty('role')
+		}
+	)
+})
 
-	it.each(['end-user', 'agent'])('creation accepts the %s role', (role) => {
-		const user = { name: 'Ada', email: 'ada@example.com', role }
+describe('create_user', () => {
+	// The other half of the schema stripping `role`: the handler is the only place the role
+	// can come from, and it always says end-user.
+	it('pins every account it creates to the end-user role', async () => {
+		const client = stubClient()
 
-		expect(createPayload.safeParse(user).success).toBe(true)
+		await createUser.handler(client as unknown as ZendeskClient, {
+			name: 'Ada',
+			email: 'ada@example.com',
+		})
+
+		expect(client.createUser).toHaveBeenCalledWith({
+			name: 'Ada',
+			email: 'ada@example.com',
+			role: 'end-user',
+		})
 	})
 })
 
