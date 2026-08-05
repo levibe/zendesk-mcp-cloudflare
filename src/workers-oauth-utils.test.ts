@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { ClientInfo } from '@cloudflare/workers-oauth-provider'
+import { decodeBase64Json, encodeBase64Utf8 } from './utils/base64'
 import { clientIdAlreadyApproved, renderApprovalDialog } from './workers-oauth-utils'
 
 const COOKIE_NAME = 'mcp-approved-clients'
@@ -12,8 +13,14 @@ const SECRET = 'test-cookie-secret'
  * The signing is duplicated here rather than reached for inside the module because it is
  * private, and because a test that computes the HMAC itself would still pass if the module
  * stopped signing at all. This one only passes when both sides agree.
+ *
+ * `encode` defaults to the UTF-8 encoding the module writes today; passing `btoa` builds a
+ * cookie in the format the retired encoder wrote, which the read path has to keep honouring.
  */
-const signedCookie = async (approvedClients: string[]): Promise<string> => {
+const signedCookie = async (
+	approvedClients: string[],
+	encode: (payload: string) => string = encodeBase64Utf8
+): Promise<string> => {
 	const payload = JSON.stringify(approvedClients)
 	const key = await crypto.subtle.importKey(
 		'raw',
@@ -27,7 +34,7 @@ const signedCookie = async (approvedClients: string[]): Promise<string> => {
 		.map((b) => b.toString(16).padStart(2, '0'))
 		.join('')
 
-	return `${signatureHex}.${btoa(payload)}`
+	return `${signatureHex}.${encode(payload)}`
 }
 
 const requestWithCookie = (value: string): Request =>
@@ -66,6 +73,27 @@ describe('clientIdAlreadyApproved', () => {
 		const request = requestWithCookie(await signedCookie(['client-a']))
 
 		await expect(clientIdAlreadyApproved(request, 'client-b', SECRET)).resolves.toBe(false)
+	})
+
+	// A client id is a string the client registered, so nothing holds it to ASCII. Before #74
+	// writing this cookie threw — bare btoa refused the id — which surfaced as a 500 on the
+	// approval redirect rather than anywhere near the encoding.
+	it('approves a client whose id needs more than Latin-1', async () => {
+		const request = requestWithCookie(await signedCookie(['клиент-Ā']))
+
+		await expect(clientIdAlreadyApproved(request, 'клиент-Ā', SECRET)).resolves.toBe(true)
+	})
+
+	// Written with bare btoa, exactly as the retired encoder wrote it. The cookie carries a
+	// one-year Max-Age, so cookies in this format keep arriving long after the deploy that
+	// stopped writing them — the decode fallback this exercises is permanent, and the
+	// signature still verifies because the fallback returns the exact string that was signed.
+	// Latin-1 rather than ASCII on purpose: an ASCII payload is byte-identical in both
+	// formats, and only a Latin-1 one actually reaches the fallback.
+	it('still approves a client named in a cookie the old encoder wrote', async () => {
+		const request = requestWithCookie(await signedCookie(['café-client'], btoa))
+
+		await expect(clientIdAlreadyApproved(request, 'café-client', SECRET)).resolves.toBe(true)
 	})
 
 	// #4. A cookie only has to look structurally right — two dot-separated parts — to reach the
@@ -161,5 +189,25 @@ describe('renderApprovalDialog link schemes', () => {
 
 		expect(html).toContain('&#039;')
 		expect(html).not.toContain('/it\'s"here')
+	})
+})
+
+describe('renderApprovalDialog state encoding', () => {
+	// Before #74 this render threw outright — bare btoa refused the state's text — so the
+	// approval dialog itself was a 500 whenever the authorization request carried anything
+	// above U+00FF. Decoding the hidden field back out proves the round-trip, and base64 is
+	// attribute-safe by construction: its alphabet holds none of the characters that could
+	// end the attribute or the tag.
+	it('encodes a state the approval form can round-trip whatever text it holds', async () => {
+		const state = { oauthReqInfo: { clientId: 'test-client', state: 'Āé😀' } }
+		const response = renderApprovalDialog(new Request('https://mcp.example.com/authorize'), {
+			client: null,
+			server: { name: 'Test Server' },
+			state,
+		})
+		const html = await response.text()
+		const encoded = html.match(/name="state" value="([^"]+)"/)![1]
+
+		expect(decodeBase64Json(encoded)).toEqual(state)
 	})
 })

@@ -2,6 +2,16 @@
 
 import type { AuthRequest, ClientInfo } from '@cloudflare/workers-oauth-provider' // Adjust path if necessary
 
+// Local edit to this vendored file: every base64 round-trip goes through the UTF-8 helpers,
+// because bare btoa throws on any code point above U+00FF and these payloads carry callers'
+// own text. Keep the swaps if this file is refreshed from upstream.
+import {
+	decodeBase64Json,
+	decodeBase64Utf8,
+	encodeBase64Json,
+	encodeBase64Utf8,
+} from './utils/base64'
+
 const COOKIE_NAME = 'mcp-approved-clients'
 const ONE_YEAR_IN_SECONDS = 31536000
 
@@ -14,10 +24,7 @@ const ONE_YEAR_IN_SECONDS = 31536000
  */
 function _encodeState(data: any): string {
 	try {
-		const jsonString = JSON.stringify(data)
-		// Use btoa for simplicity, assuming Worker environment supports it well enough
-		// For complex binary data, a Buffer/Uint8Array approach might be better
-		return btoa(jsonString)
+		return encodeBase64Json(data)
 	} catch (e) {
 		console.error('Error encoding state:', e)
 		throw new Error('Could not encode state')
@@ -31,8 +38,7 @@ function _encodeState(data: any): string {
  */
 function decodeState<T = any>(encoded: string): T {
 	try {
-		const jsonString = atob(encoded)
-		return JSON.parse(jsonString)
+		return decodeBase64Json(encoded) as T
 	} catch (e) {
 		console.error('Error decoding state:', e)
 		throw new Error('Could not decode state')
@@ -126,12 +132,17 @@ async function getApprovedClientsFromCookie(
 
 	const [signatureHex, base64Payload] = parts
 
-	// `atob` throws on any character outside the base64 alphabet, and the cookie only has to
-	// look structurally right — two dot-separated parts — to reach here. Left unhandled that
-	// throw escapes to Hono as a 500, and since the cookie is written with a one-year Max-Age
-	// the user then gets that 500 on every subsequent /authorize until they clear cookies by
-	// hand. Returning null instead falls through to the approval dialog, which is what every
-	// other malformed-cookie case below already does.
+	// The `atob` inside the decode throws on any character outside the base64 alphabet, and the
+	// cookie only has to look structurally right — two dot-separated parts — to reach here. Left
+	// unhandled that throw escapes to Hono as a 500, and since the cookie is written with a
+	// one-year Max-Age the user then gets that 500 on every subsequent /authorize until they
+	// clear cookies by hand. Returning null instead falls through to the approval dialog, which
+	// is what every other malformed-cookie case below already does.
+	//
+	// The signature below is computed over this decoded string, and the decode gives back the
+	// exact string the writer signed for both formats — the UTF-8 one this file writes now, and
+	// the bare-btoa one still sitting in browsers under that Max-Age — so verification is
+	// unaffected by which encoder wrote the cookie.
 	//
 	// This is deliberately its own try rather than an extension of the one further down. That
 	// one starts after `importKey`, which throws when COOKIE_ENCRYPTION_KEY is missing — a
@@ -139,7 +150,7 @@ async function getApprovedClientsFromCookie(
 	// would silently answer a missing secret with the approval dialog forever.
 	let payload: string
 	try {
-		payload = atob(base64Payload)
+		payload = decodeBase64Utf8(base64Payload)
 	} catch {
 		console.warn('Cookie payload is not valid base64.')
 		return null
@@ -256,7 +267,7 @@ export function renderApprovalDialog(request: Request, options: ApprovalDialogOp
 	const { client, server, state } = options
 
 	// Encode state for form submission
-	const encodedState = btoa(JSON.stringify(state))
+	const encodedState = encodeBase64Json(state)
 
 	// Sanitize any untrusted content
 	const serverName = sanitizeHtml(server.name)
@@ -641,7 +652,7 @@ export async function parseRedirectApproval(
 	const payload = JSON.stringify(updatedApprovedClients)
 	const key = await importKey(cookieSecret)
 	const signature = await signData(key, payload)
-	const newCookieValue = `${signature}.${btoa(payload)}` // signature.base64(payload)
+	const newCookieValue = `${signature}.${encodeBase64Utf8(payload)}` // signature.base64(payload)
 
 	// Generate Set-Cookie header
 	const headers: Record<string, string> = {

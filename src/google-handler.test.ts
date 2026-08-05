@@ -12,6 +12,7 @@
 import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import type { AuthRequest, OAuthHelpers } from '@cloudflare/workers-oauth-provider'
 import { GoogleHandler } from './google-handler'
+import { decodeBase64Json, encodeBase64Json } from './utils/base64'
 import {
 	clientIdAlreadyApproved,
 	parseRedirectApproval,
@@ -186,6 +187,38 @@ describe('GET /callback', () => {
 				expect.stringMatching(/./)
 			)
 			await expect(response.text()).resolves.toBe('Invalid state')
+		})
+	})
+
+	// Both halves of the pair moved together in #74, so what /callback reads is what
+	// redirectToGoogle now mints — UTF-8 base64 — plus whatever the old encoder minted before
+	// the deploy and left in flight or sitting in a browser. The decoder is shared with the
+	// approval cookie, whose one-year Max-Age is why the legacy path is permanent rather than
+	// a migration window; these drive both formats through the callback's own decode.
+	describe('a state carrying more than ASCII', () => {
+		it('completes a flow whose state carries text bare btoa refused', async () => {
+			const state = encodeBase64Json({ ...authRequest, state: 'Āé😀', nonce: NONCE })
+
+			const response = await callback({ state, code: 'google-code' })
+
+			expect(response.status).toBe(302)
+			expect(completeAuthorization).toHaveBeenCalledWith(
+				expect.objectContaining({ request: expect.objectContaining({ state: 'Āé😀' }) })
+			)
+		})
+
+		// Latin-1 is the only non-ASCII the old encoder could write — it threw on everything
+		// above U+00FF — and its single bytes are invalid UTF-8, so this is the case that
+		// exercises the fallback rather than agreeing with the new format byte for byte.
+		it('still reads a state the old bare-btoa encoder minted', async () => {
+			const legacy = btoa(JSON.stringify({ ...authRequest, state: 'café', nonce: NONCE }))
+
+			const response = await callback({ state: legacy, code: 'google-code' })
+
+			expect(response.status).toBe(302)
+			expect(completeAuthorization).toHaveBeenCalledWith(
+				expect.objectContaining({ request: expect.objectContaining({ state: 'café' }) })
+			)
 		})
 	})
 
@@ -630,18 +663,33 @@ describe('/authorize', () => {
 			})
 		})
 
-		// btoa refuses any code point above U+00FF, and redirectToGoogle is where a caller's own
-		// text reaches it. This is the cheapest 500 in the file to reach: one form field, no
-		// sign-in, no cookie, no registered client.
-		//
-		// The character has to sit somewhere other than clientId. parseRedirectApproval requires
-		// a truthy clientId and base64s it into the approval cookie, so a non-Latin-1 one would
-		// throw there instead and never reach the mint site — which is exactly why this went
-		// unnoticed: every check in front of it looks like it should have caught it.
-		it('answers 400 when the approval cannot be encoded as state', async () => {
+		// The #71 pin inverted. It used to assert a 400 here, recording that bare btoa refused
+		// any code point above U+00FF until something fixed the encoding — #74 is that fix, so
+		// the assertion is now the opposite one: the mint goes through UTF-8 and a caller's own
+		// text redirects like any other approval. Decoding the state back out of the consent
+		// URL is what proves it round-tripped rather than merely failed to throw.
+		it('redirects when the approval carries text bare btoa refused', async () => {
+			vi.mocked(parseRedirectApproval).mockResolvedValue({
+				state: { oauthReqInfo: { ...authRequest, state: 'Āé😀' } },
+				headers: {},
+			})
+
+			const response = await approve()
+
+			expect(response.status).toBe(302)
+			const url = googleUrl(response)
+			expect(url.hostname).toBe('accounts.google.com')
+			expect(decodeBase64Json(url.searchParams.get('state')!)).toMatchObject({ state: 'Āé😀' })
+		})
+
+		// What is left for the guard is a backstop. Nothing parseRedirectApproval can decode out
+		// of a form makes JSON.stringify throw, so driving the catch takes a value JSON refuses
+		// outright — and that is the point of keeping the test: whatever manages to throw at the
+		// mint next, the answer has to be this 400, never the bare 500 this route once produced.
+		it('answers 400 when the approval cannot be encoded as state at all', async () => {
 			const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
 			vi.mocked(parseRedirectApproval).mockResolvedValue({
-				state: { oauthReqInfo: { ...authRequest, state: 'Ā' } },
+				state: { oauthReqInfo: { ...authRequest, state: BigInt(1) } },
 				headers: {},
 			})
 
@@ -653,20 +701,6 @@ describe('/authorize', () => {
 				'The authorization request could not be encoded as state:',
 				expect.stringMatching(/./)
 			)
-		})
-
-		// The same object with the character removed still goes through, so the guard above is
-		// refusing the encoding rather than the shape.
-		it('still redirects when the same approval is encodable', async () => {
-			vi.mocked(parseRedirectApproval).mockResolvedValue({
-				state: { oauthReqInfo: { ...authRequest, state: 'A' } },
-				headers: {},
-			})
-
-			const response = await approve()
-
-			expect(response.status).toBe(302)
-			expect(googleUrl(response).hostname).toBe('accounts.google.com')
 		})
 
 		// The headers parseRedirectApproval hands back are the approval cookie, which is the whole
