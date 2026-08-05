@@ -118,12 +118,9 @@ export const updateTicketSchema = {
 	assignee_id: z.number().optional().describe('User ID of the new assignee'),
 	group_id: z.number().optional().describe('New group ID for the ticket'),
 	type: ticketTypeSchema.optional().describe('Updated ticket type'),
-	tags: z
-		.array(z.string())
-		.optional()
-		.describe(
-			"The ticket's complete tag list. Read the ticket with get_ticket first and send all of its tags rather than only the new ones, since what arrives replaces the set"
-		),
+	tags: tagsSchema.describe(
+		"The ticket's complete tag list. Read the ticket with get_ticket first and send all of its tags rather than only the new ones, since what arrives replaces the set"
+	),
 }
 
 /**
@@ -196,12 +193,9 @@ export const updateOrganizationSchema = {
 	name: nameSchema.optional().describe('Updated organization name'),
 	details: descriptionSchema.describe('Updated details about the organization'),
 	notes: z.string().optional().describe('Updated notes about the organization'),
-	tags: z
-		.array(z.string())
-		.optional()
-		.describe(
-			"The organization's complete tag list. Read the organization first and send all of its tags rather than only the new ones, since what arrives replaces the set"
-		),
+	tags: tagsSchema.describe(
+		"The organization's complete tag list. Read the organization first and send all of its tags rather than only the new ones, since what arrives replaces the set"
+	),
 }
 
 export const createGroupSchema = {
@@ -534,7 +528,9 @@ export const viewOutputSchema = z.object({
 	columns: z
 		.array(z.string())
 		.min(1)
-		.describe('Ticket fields shown as columns, e.g. subject, status, assignee, updated'),
+		.describe(
+			'Ticket fields shown as columns, as field names — e.g. subject, status, assignee, updated — not the column objects a read returns under execution'
+		),
 	group_by: z.string().optional().describe('Field the rows are grouped by'),
 	group_order: z.enum(['asc', 'desc']).optional().describe('Direction the groups are ordered in'),
 	sort_by: z.string().optional().describe('Field the rows are sorted by'),
@@ -632,7 +628,9 @@ export const updateViewSchema = {
 /**
  * The wire shape, which differs from the schemas in three deliberate ways. `conditions` is
  * flattened into the top-level `all`/`any` Zendesk's views API takes, with both arrays always
- * present so a replacement cannot half-apply — see `viewConditionsSchema`. `restriction` is
+ * present so a replacement cannot half-apply — see `viewConditionsSchema`. The update holds
+ * that pairing in its type: the union's `never` arm lets the groups be omitted together while
+ * refusing the half-set a `Partial` would compile. `restriction` is
  * optional and never null, because "every agent" travels as omission — see
  * `viewRestrictionSchema`. And creation is pinned dormant: `active: false` is held in the
  * type for the reason the business rule payloads hold it — the schemas never accept the
@@ -649,7 +647,7 @@ export type ViewCreatePayload = Omit<
 > &
 	ViewConditionGroups & { restriction?: ViewRestriction; active: false }
 export type ViewUpdatePayload = Omit<InferParams<typeof updateViewSchema>, 'conditions'> &
-	Partial<ViewConditionGroups>
+	(ViewConditionGroups | { all?: never; any?: never })
 
 /**
  * What an article says, which Zendesk keeps on the article's translation rather than on the
