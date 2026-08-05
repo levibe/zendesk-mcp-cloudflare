@@ -1,39 +1,31 @@
 # Zendesk MCP Server with Google OAuth
 
-This is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/introduction) server that provides comprehensive Zendesk API integration with Google OAuth authentication, deployed on Cloudflare Workers.
+This is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/introduction) server that gives MCP clients authenticated access to the Zendesk API, deployed on Cloudflare Workers and signed in through Google.
 
-The server allows MCP clients (like Claude Desktop) to interact securely with Zendesk APIs through authenticated remote connections. It reads across tickets, users, organizations, the Help Center and more, and writes only macros.
+## What it does
 
-## Features
+It reads widely across Zendesk and writes almost nothing.
 
-### Zendesk API Coverage
+- **Tickets, users and organizations**: list, fetch and search
+- **Groups, macros, views, triggers and automations**: list and fetch
+- **Help Center**: browse and search articles, sections and categories
+- **Search**: one query across everything above
+- **Talk and Chat**: call statistics and chat conversations
+- **Support**: general configuration information
 
-The server reads widely and writes only macros. Reading covers:
+Anything named `list_*`, `get_*` or `search_*` is available, along with `search` and `support_info`.
 
-- **Tickets**: List, fetch and search support tickets
-- **Users**: List, fetch and search users
-- **Organizations**: List, fetch and search organizations
-- **Groups**: List and fetch agent groups
-- **Macros**: List and fetch ticket macros
-- **Views**: List and fetch ticket views
-- **Triggers**: List and fetch triggers
-- **Automations**: List and fetch automations
-- **Search**: Search across all Zendesk data
-- **Help Center**: Browse and search the knowledge base — articles, sections and categories
-- **Support**: General configuration information
-- **Talk**: Access call center statistics
-- **Chat**: Read chat conversations
+**Writing is limited to `create_macro` and `update_macro`.** A macro is a shortcut an agent applies to a ticket by hand, so creating one changes nothing on its own, which is why these two are permitted where nothing else is.
 
-Writing is limited to creating and updating macros. [Available Tools](#available-tools) explains why, and what happens if you ask for anything else.
+**Everything else is refused.** Tickets, Help Center articles, triggers, automations, views, users, organizations and groups all have write tools that are written, tested and never offered to a client, so asking for one will not work. Nothing else writes at all: deleting a macro, for instance, was never built as a tool. The permitted set is decided in `src/utils/tool-registry.ts`, and the server logs what it withheld each time it starts.
 
-### Technical Features
+Several of those carry a second guardrail that outlives the allowlist. An article this server creates is always a draft, and there is no way to publish one through it at all; a trigger, automation or view is always created switched off, and turning one on stays a human action in Zendesk; a user it creates is always an end-user, never an agent or an admin. CLAUDE.md sets out why each is shaped that way.
 
-- **Google OAuth Authentication**: Secure user authentication flow
-- **Remote MCP Protocol**: Streamable HTTP, stateless — each request stands alone, with no session to establish or keep alive
-- **Cloudflare Workers**: Serverless deployment with global edge distribution
-- **Type Safety**: Full TypeScript implementation with Zod validation
-- **Error Handling**: Comprehensive error handling with user-friendly messages
-- **Modular Architecture**: Easy to extend with additional tools
+## How it works
+
+- **Google OAuth**: signing in goes through Google, and `HOSTED_DOMAIN` can restrict it to a single domain
+- **Streamable HTTP, stateless**: each request stands alone, with no session to establish or keep alive
+- **Cloudflare Workers**: serverless, with no Durable Object and nothing held between requests
 
 ## Getting Started
 
@@ -85,7 +77,7 @@ pnpm exec wrangler secret put HOSTED_DOMAIN # Optional: restrict to specific Goo
 
 For local development, create `.dev.vars`:
 
-```
+```text
 GOOGLE_CLIENT_ID=your_dev_client_id
 GOOGLE_CLIENT_SECRET=your_dev_client_secret
 ZENDESK_SUBDOMAIN=your_subdomain
@@ -100,23 +92,15 @@ pnpm exec wrangler kv namespace create "OAUTH_KV"
 # Update wrangler.jsonc with the returned KV ID
 ```
 
-### 5. Deploy & Test
-
-#### Deploy to Production
+### 5. Deploy and Test
 
 ```bash
 pnpm install
-pnpm run deploy
+pnpm run deploy   # production
+pnpm run dev      # local, on localhost:8788
 ```
 
-#### Local Development
-
-```bash
-pnpm install
-pnpm run dev
-```
-
-#### Test with MCP Inspector
+Then point the MCP Inspector at it:
 
 ```bash
 pnpm dlx @modelcontextprotocol/inspector
@@ -137,22 +121,20 @@ There are two routes in, and they behave differently enough that the choice matt
 
 Claude holds remote MCP servers on your account rather than in a file on disk, so there is nothing to install and no Node runtime on the machine. Each person adds it once themselves, and it asks for a display name as well as the URL:
 
-```
+```text
 Name   Momentum Zendesk
 URL    https://zendesk-mcp.<your-subdomain>.workers.dev/mcp
 ```
 
 Inside Claude Desktop that is **Settings → Connectors → Add custom connector**, which `Cmd+,` opens directly. At claude.ai it sits under **Customize → Connectors** instead, behind the **+** button.
 
-An Owner on Team or Enterprise can instead enable the connector for the whole organization, under **Organization settings → Connectors**. That saves everyone adding it, but it does not sign anyone in — each member still authorizes individually the first time they use it, unless the organization has configured managed authentication.
+An Owner on Team or Enterprise can instead enable the connector for the whole organization, under **Organization settings → Connectors**. That saves everyone adding it, but it does not sign anyone in. Each member still authorizes individually the first time they use it, unless the organization has configured managed authentication.
 
-Either way the connector follows the account rather than the machine, so it appears in Claude Desktop and at claude.ai both, and `claude_desktop_config.json` is not involved at all.
+Either way the connector follows the account rather than the machine, so it appears in Claude Desktop and at claude.ai both, and `claude_desktop_config.json` is not involved at all. Anthropic's servers make the connection rather than your machine, which is why a connector cannot reach a local dev server. `HOSTED_DOMAIN` still governs who may sign in, so this route does not widen access.
 
-`/mcp` is the only endpoint. `/sse` served the superseded HTTP+SSE transport, which MCP revision 2026-07-28 deprecates outright, and it has been removed — a client configured against it now gets nothing. Clients too old to speak the current revision are still served at `/mcp`, so on transport grounds this only strands one that can speak HTTP+SSE and nothing else.
+`/mcp` is the only endpoint. `/sse` served the superseded HTTP+SSE transport, which MCP revision 2026-07-28 deprecates outright, and it has been removed, so a client configured against it now gets nothing. Clients too old to speak the current revision are still served at `/mcp`, so on transport grounds this only strands one that can speak HTTP+SSE and nothing else.
 
-One other kind of client is turned away, for an unrelated reason. The server validates the `Origin` header whenever a request carries one. By default it accepts localhost, and also the worker's own hostname when you are on a `workers.dev` address — so a page served from the worker itself is fine, while a custom domain is left allowing localhost alone. Any other origin gets a 403. Nothing described on this page is affected, since a connector is fetched by Anthropic's servers and `mcp-remote` runs under Node, and neither sends an `Origin` at all. It is simply the first thing to check if a browser-based client fails with a message about origins rather than about transports.
-
-Anthropic's infrastructure makes this connection rather than the user's machine, so the worker has to be reachable over the public internet, which a deployed worker already is. That is also the property that makes this route viable for people who will never open a terminal: nothing runs locally, so there is nothing local to go wrong. `HOSTED_DOMAIN` still governs who may sign in, so a connector does not widen access.
+A browser-based client can be turned away for an unrelated reason. The server validates the `Origin` header whenever a request carries one, accepting localhost and, on a `workers.dev` address, the worker's own hostname. A custom domain is therefore left allowing localhost alone, and any other origin gets a 403. Nothing on this page is affected, since a connector is fetched by Anthropic's servers and `mcp-remote` runs under Node, so neither sends an `Origin` at all. It is only worth knowing if a browser-based client fails with a message about origins rather than about transports.
 
 ### Through the `mcp-remote` proxy
 
@@ -182,13 +164,13 @@ The file usually already holds your app preferences, so add `mcpServers` alongsi
 }
 ```
 
-Claude Desktop reads this file only at launch, so quit it fully and start it again — closing the window leaves it running in the background and changes nothing. On macOS press Cmd+Q, and on Windows right-click the tray icon and choose Quit. To point at a local server instead, run `pnpm run dev` and use `http://localhost:8788/mcp`.
+Claude Desktop reads this file only at launch, so quit it fully and start it again. Closing the window leaves it running in the background and changes nothing. On macOS press Cmd+Q, and on Windows right-click the tray icon and choose Quit. To point at a local server instead, run `pnpm run dev` and use `http://localhost:8788/mcp`.
 
 This route asks a lot more of the machine, and the failures are worth knowing before handing it to anyone:
 
 - **Node has to be installed.** `npx` is not present on a machine without Node, which rules this out for most non-technical users on its own.
-- **Two timers run against first-time sign-in, and both are short.** `mcp-remote` waits 30 seconds for the OAuth callback unless `--auth-timeout` says otherwise, and Claude Desktop separately cancels a server that has not finished initializing within 60 seconds. Picking a Google account can outlast either. The symptom is a browser landing on `localhost:<port>` with nothing listening, because the proxy was gone before the redirect came back. Retrying usually works, since the second attempt reuses the approval cookie and the Google session — which is exactly why this is easy to dismiss as a fluke.
-- **A slow tool call gets dropped.** Node's fetch abandons a response body after 300 seconds of silence, which surfaces as `Body Timeout Error` and a reconnect underneath you — and reconnecting can re-enter the auth path and open a browser window unprompted. This used to be the common failure, because the server held a stream open between calls for the old transport to push down. It no longer holds one, so the only way to sit silent that long now is a single Zendesk request taking five minutes.
+- **Two timers run against first-time sign-in, and both are short.** `mcp-remote` waits 30 seconds for the OAuth callback unless `--auth-timeout` says otherwise, and Claude Desktop separately cancels a server that has not finished initializing within 60 seconds. Picking a Google account can outlast either. The symptom is a browser landing on `localhost:<port>` with nothing listening, because the proxy was gone before the redirect came back. Retrying usually works, since the second attempt reuses the approval cookie and the Google session, which is exactly why this is easy to dismiss as a fluke.
+- **A slow tool call gets dropped.** Node's fetch abandons a response body after 300 seconds of silence, which surfaces as `Body Timeout Error` and a reconnect underneath you, and reconnecting can re-enter the auth path and open a browser window unprompted. This used to be the common failure, because the server held a stream open between calls for the old transport to push down. It no longer holds one, so the only way to sit silent that long now is a single Zendesk request taking five minutes.
 - **Windows cannot find `npx`.** Claude Desktop spawns the command without a shell, so the `.cmd` shim never resolves. Use `"command": "cmd"` with `"args": ["/c", "npx", "mcp-remote", "<your-url>"]`.
 - **Tokens are cached on disk.** They live in `~/.mcp-auth` on macOS and `%USERPROFILE%\.mcp-auth` on Windows. Delete that folder if authentication gets stuck after a URL change. A stale lockfile there needs no attention, since the proxy detects and clears it.
 
@@ -201,76 +183,67 @@ Authenticate through the browser flow when prompted, then ask Claude to:
 - "List all users in the Sales organization"
 - "Draft a macro that solves a ticket and thanks the customer"
 
-## Available Tools
+## Connecting ChatGPT
 
-The server reads widely and writes almost nothing.
+ChatGPT speaks MCP as well, so this server works there, but only through Developer Mode.
 
-**Reading** covers tickets, users, organizations, groups, macros, views, triggers, automations, Talk statistics, Chat conversations and the whole Help Center — listing them, fetching one by ID, and searching. Anything named `list_*`, `get_*` or `search_*` is available, along with `search` and `support_info`.
+ChatGPT consumes an MCP server in two quite different ways. An ordinary connector, the kind behind deep research and company knowledge, never calls arbitrary tools: it calls exactly two, named `search` and `fetch`, returning a shape OpenAI specifies. This server publishes neither, so ChatGPT will refuse to add it that way. Developer Mode is the other route, and there the whole published tool list is callable, which is more than the two-tool connector would ever have given you.
 
-**Writing** is limited to `create_macro` and `update_macro`. A macro is a shortcut an agent applies to a ticket by hand, so creating one changes nothing on its own — which is why these two are permitted where nothing else is.
+### Enabling Developer Mode
 
-**Everything else is refused.** Creating, updating and deleting a ticket, and creating a user, an organization or a group, are all written and working in the code but never offered to a client, so asking for them will not work. Nothing else writes at all — deleting a macro, for instance, was never built as a tool. The server logs what it withheld each time it starts.
+It is a beta feature on the web, available on Pro, Plus, Business, Enterprise and Education accounts.
 
-The permitted set is decided in `src/utils/tool-registry.ts`, and the tools themselves are defined under `src/tools/`. See CLAUDE.md for how a tool gets permitted.
+OpenAI's documentation contradicts itself about writes. The developer guide gives all five plans both read and write, while the help articles limit write actions to Business, Enterprise and Education and leave Pro reading only. Only `create_macro` and `update_macro` are at stake either way, so on a personal plan expect the reads to work and do not count on the two macro tools.
+
+Find the toggle under **Settings → Security and login** and turn on **Developer mode**. That toggle has moved between releases and previously lived under **Settings → Connectors → Advanced settings**, so look there if it is not where you expect.
+
+On a Business or Enterprise workspace an administrator can switch Developer Mode off for everyone, or allow only named connectors. A missing toggle on a work account usually means that rather than an unsupported plan.
+
+### Adding the server
+
+With Developer Mode on, create a connector and give it a name, the URL and OAuth as the authentication method:
+
+```text
+Name   Momentum Zendesk
+URL    https://zendesk-mcp.<your-subdomain>.workers.dev/mcp
+```
+
+Use `/mcp`. Ignore any instruction that a remote MCP URL has to end in `/sse`, including some of OpenAI's own documentation. That endpoint served the superseded transport and has been removed here, as described above. ChatGPT speaks Streamable HTTP, which is what `/mcp` answers.
+
+You will be sent through the Google sign-in flow the first time, and `HOSTED_DOMAIN` governs who may complete it, exactly as it does for a Claude connector. ChatGPT registers itself through `/register` on the way past, so there is no client ID to create or paste anywhere.
+
+### Living with it
+
+The connector appears as a Developer mode tool in the composer, and you select it during a conversation rather than it being always on.
+
+The tool list is the same one Claude sees. Nothing is published to one client and withheld from another, because registration applies the same policy on every request whoever is asking.
+
+Write actions ask for confirmation before they run. You can tell ChatGPT to remember the answer for the rest of that conversation, and a new conversation starts asking again. Read the arguments rather than waving it through: that prompt is the last thing standing between a model's mistake and a real macro in Zendesk.
+
+OpenAI is direct that Developer Mode is for people who understand what they are switching on, and names three risks: prompt injection, a model getting a write wrong, and a malicious server stealing data. The third is a question about who runs the server, which here is you. The first two are bounded by the write policy above, so full access in Developer Mode is full access to a deliberately short list.
 
 ## Development
 
 ### Adding New Tools
 
-To extend with additional Zendesk tools:
-
-1. Add API methods to `ZendeskClient` in `src/zendesk-client.ts`
-2. Create tool definitions in appropriate `src/tools/` file
-3. Export tools from `src/tools/index.ts`
-
-Example:
+1. Add the API method to `ZendeskClient` in `src/zendesk-client.ts`
+2. Add a `createTool` entry to the relevant file under `src/tools/`
+3. If the file is a new one, add it to `toolCategories` in `src/tools/index.ts`. Exporting it is not enough, because registration walks that object and nothing else.
 
 ```typescript
 // In src/tools/custom.ts
 export const customTools: ToolDefinition[] = [
 	createTool(
-		'my_custom_tool',
-		'Description of what this tool does',
-		{ param: z.string().describe('Parameter description') },
-		async (client: ZendeskClient, { param }) => {
-			return client.myCustomMethod(param)
+		'list_widgets',
+		'List widgets in Zendesk',
+		{ ...paginationSchema },
+		async (client, params) => {
+			return client.listWidgets(params)
 		}
 	),
 ]
 ```
 
-### Project Structure
+Do not annotate the handler's parameters. They are inferred from the schema you pass as the third argument, and writing the type out by hand creates a second source of truth that nothing reconciles.
 
-```
-src/
-├── index.ts              # Main entry point
-├── google-handler.ts     # OAuth handler
-├── zendesk-client.ts     # Zendesk API client
-├── tools/                # MCP tool definitions
-├── types/                # TypeScript types
-└── utils/                # Utilities and helpers
-```
-
-## Architecture
-
-This server demonstrates a clean architecture for remote MCP servers:
-
-- **OAuth Provider**: Handles secure authentication with Google
-- **API Client**: Cloudflare Workers-compatible HTTP client
-- **Tool Registry**: Modular tool organization and registration
-- **Error Handling**: Functional approach with consistent error responses
-- **Type Safety**: Full TypeScript with runtime validation
-
-This pattern can be adapted for other APIs by:
-
-1. Replacing `ZendeskClient` with your API client
-2. Creating new tool definitions in `src/tools/`
-3. Updating environment variables and configuration
-
-## Support
-
-For issues and questions:
-
-- Check the [MCP documentation](https://modelcontextprotocol.io/)
-- Review [Cloudflare Workers docs](https://developers.cloudflare.com/workers/)
-- Consult [Zendesk API documentation](https://developer.zendesk.com/api-reference/)
+Adding a tool does not publish it. A read gets through on its `list_`, `get_` or `search_` prefix, while a write reaches no client at all until it is named in `WRITE_TOOLS_ENABLED` in `src/utils/tool-registry.ts`. CLAUDE.md carries the test a write has to pass to get in.
