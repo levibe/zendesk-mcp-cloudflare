@@ -88,18 +88,14 @@ export const registerAllTools = (
  * from registration: since #40 the server is rebuilt per request, so a message logged as a
  * side effect of registering would repeat on every tool call.
  *
- * A refused config is reported through `console.error`, and loudly, because fail-closed is
- * otherwise silent in production: the deploy succeeds and the write tools just vanish. This
- * log line is the only symptom there is.
+ * A refused config is deliberately not reported here: this runs once per isolate, and a
+ * config that is broken right now deserves a line on every request it affects, so the caller
+ * logs the refusal on the request path instead.
  */
 export const announceWithheldTools = (
 	toolCategories: Record<string, ToolDefinition[]>,
 	resolved: ResolvedCeilings
 ): void => {
-	if (resolved.error) {
-		console.error(`TOOL_CEILINGS refused (${resolved.error}); every group falls closed to read`)
-	}
-
 	const ceilingsNamed = Object.entries(resolved.ceilings)
 		.map(([group, ceiling]) => `${group}=${ceiling}`)
 		.join(', ')

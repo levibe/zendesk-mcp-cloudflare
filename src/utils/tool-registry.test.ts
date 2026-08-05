@@ -332,15 +332,16 @@ describe('announceWithheldTools', () => {
 		expect(error).not.toHaveBeenCalled()
 	})
 
-	// Fail-closed is silent in production — the deploy succeeds and the write tools just
-	// vanish — so the refused config surfacing here, loudly, is the only symptom there is.
-	it('reports a refused config through console.error and announces the read-only fallback', () => {
+	// The refusal itself is logged per affected request by the caller in src/index.ts, not
+	// here — this runs once per isolate, so erroring from it would understate a config that
+	// is broken right now. The announcement's job is naming the fallback the refusal caused.
+	it('announces the read-only fallback of a refused config without logging the refusal', () => {
 		const refused = resolveCeilings(undefined, Object.keys(toolCategories))
 
 		announceWithheldTools(toolCategories, refused)
 
-		expect(error).toHaveBeenCalledWith(expect.stringContaining('TOOL_CEILINGS refused'))
 		expect(log).toHaveBeenCalledWith(expect.stringContaining('macros=read'))
+		expect(error).not.toHaveBeenCalled()
 	})
 
 	// The same read-only backstop registerAllTools applies, so the announcement never claims

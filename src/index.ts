@@ -66,6 +66,13 @@ const mcpHandler = {
 		// special path. Malformed or missing config fails closed to read on every group.
 		const resolved = resolveCeilings(env.TOOL_CEILINGS, Object.keys(toolCategories))
 
+		// The refusal is logged on every request it affects, not once behind the flag below:
+		// failing closed is otherwise invisible, and one line per affected request is the
+		// representative loudness for a config that is broken right now.
+		if (resolved.error) {
+			console.error(`TOOL_CEILINGS refused (${resolved.error}); every group falls closed to read`)
+		}
+
 		if (!announced) {
 			announced = true
 			announceWithheldTools(toolCategories, resolved)
