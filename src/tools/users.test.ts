@@ -78,6 +78,21 @@ describe('create_user', () => {
 			role: 'end-user',
 		})
 	})
+
+	// Belt and braces against the schema being loosened later: even handed a role directly,
+	// the handler overrides it rather than passing it on. The spread order is what this pins —
+	// Zod stripping the field upstream means a reorder would fail silently without it.
+	it('overrides a role that reaches it anyway', async () => {
+		const client = stubClient()
+
+		await createUser.handler(client as unknown as ZendeskClient, {
+			name: 'Ada',
+			email: 'ada@example.com',
+			role: 'admin',
+		})
+
+		expect(client.createUser.mock.calls[0][0].role).toBe('end-user')
+	})
 })
 
 describe('update_user', () => {

@@ -149,10 +149,10 @@ export type TicketUpdatePayload = Omit<InferParams<typeof updateTicketSchema>, '
  * the business rule payloads hold `active: false` — the schema never takes the field, so the
  * role can only come from the handler, and `UserCreatePayload` makes forgetting it a compile
  * error. A privileged account at a caller-chosen email is a takeover in one call — the
- * password reset goes wherever the email points — and an agent already reads every ticket in
- * the instance, so the argument that refuses `admin` refuses `agent` with it. Minting either
- * stays a human action in the Zendesk UI until #20's permission model gives the distinction
- * somewhere to live.
+ * password reset goes wherever the email points — and an agent is a staff account whose
+ * ticket access is a group membership away, so the argument that shuts out `admin` shuts out
+ * `agent` with it. Minting either stays a human action in the Zendesk UI until #20's
+ * permission model gives the distinction somewhere to live.
  *
  * `organization_id` is create-only for the reason `domain_names` is on an organization:
  * membership can carry shared ticket visibility, so moving a user into an organization is a
