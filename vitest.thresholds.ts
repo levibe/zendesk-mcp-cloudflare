@@ -93,7 +93,9 @@ export const coverageThresholds = {
 	// With the transport gone, the client is the constructor, the id check, and the long tail
 	// of thin senders — and the #54 prototype walk drives every one of those methods, which is
 	// what holds statements and functions at 100 structurally rather than by effort. Branches
-	// sit lower for the constructor's config-or-env fallback arms; measured 90 at the split.
+	// sit lower for the constructor's config-or-env fallback arms; measured 90 at the split,
+	// but that is 19 of 21 arms, so a single new arm costs almost five points — the floor
+	// sits one branch under the measurement, which is slack, not coverage given up.
 	'src/zendesk-client.ts': { statements: 100, branches: 85, functions: 100, lines: 100 },
 	'src/tools/help-center.ts': { branches: 85 },
 	// From nothing at all, with the first tests this file has ever had — its three routes, the
