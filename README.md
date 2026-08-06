@@ -35,6 +35,7 @@ Several of those carry a second guardrail that does not depend on the ceilings. 
 - Google Cloud Platform account for OAuth
 - Cloudflare account for deployment
 - [pnpm](https://pnpm.io/installation), which this project uses as its package manager. The exact version is pinned in `package.json`, and recent versions of pnpm will switch to it for you.
+- A GitHub personal access token (classic) with the `read:packages` scope, because the shared `@levibe/mcp-worker` package installs from GitHub Packages. Step 5 shows where it goes.
 
 ### 1. Zendesk Setup
 
@@ -93,6 +94,12 @@ pnpm exec wrangler kv namespace create "OAUTH_KV"
 ```
 
 ### 5. Deploy and Test
+
+`@levibe/mcp-worker` installs from GitHub Packages, so `pnpm install` needs a credential that the committed `.npmrc` deliberately does not carry (the "Installing @levibe/mcp-worker" section in CLAUDE.md explains why). Add this line to your user-level `~/.npmrc`, with `GITHUB_PACKAGES_TOKEN` exported in your shell as the `read:packages` token from the prerequisites:
+
+```text
+//npm.pkg.github.com/:_authToken=${GITHUB_PACKAGES_TOKEN}
+```
 
 ```bash
 pnpm install
@@ -232,7 +239,7 @@ OpenAI is direct that Developer Mode is for people who understand what they are 
 
 ```typescript
 // In src/tools/custom.ts
-export const customTools: ToolDefinition[] = [
+export const customTools: ZendeskToolDefinition[] = [
 	createTool(
 		'list_widgets',
 		'read',
