@@ -1,9 +1,8 @@
-import type { ToolDefinition } from '../types/zendesk'
 import { paginationSchema, idSchema, createGroupSchema, updateGroupSchema } from '../types/zendesk'
-import { createTool } from '../utils/tool-registry'
+import { createTool, type ZendeskToolDefinition } from './create-tool'
 import { requireChanges } from '../utils/require-changes'
 
-export const groupsTools: ToolDefinition[] = [
+export const groupsTools: ZendeskToolDefinition[] = [
 	createTool(
 		'list_groups',
 		'read',

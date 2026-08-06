@@ -7,17 +7,16 @@
  * on everything the changed conditions now match.
  */
 
-import type { ToolDefinition } from '../types/zendesk'
 import {
 	paginationSchema,
 	idSchema,
 	createAutomationSchema,
 	updateAutomationSchema,
 } from '../types/zendesk'
-import { createTool } from '../utils/tool-registry'
+import { createTool, type ZendeskToolDefinition } from './create-tool'
 import { requireChanges } from '../utils/require-changes'
 
-export const automationsTools: ToolDefinition[] = [
+export const automationsTools: ZendeskToolDefinition[] = [
 	createTool(
 		'list_automations',
 		'read',

@@ -14,7 +14,6 @@
  */
 
 import { z } from 'zod'
-import type { ToolDefinition } from '../types/zendesk'
 import {
 	paginationSchema,
 	idSchema,
@@ -22,7 +21,7 @@ import {
 	updateViewSchema,
 	viewConditionsSchema,
 } from '../types/zendesk'
-import { createTool } from '../utils/tool-registry'
+import { createTool, type ZendeskToolDefinition } from './create-tool'
 import { requireChanges } from '../utils/require-changes'
 
 /**
@@ -37,7 +36,7 @@ const replaceConditions = (conditions: z.infer<typeof viewConditionsSchema>) => 
 	any: conditions.any ?? [],
 })
 
-export const viewsTools: ToolDefinition[] = [
+export const viewsTools: ZendeskToolDefinition[] = [
 	createTool(
 		'list_views',
 		'read',

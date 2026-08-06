@@ -1,5 +1,4 @@
 import { z } from 'zod'
-import type { ToolDefinition } from '../types/zendesk'
 import {
 	paginationSchema,
 	sortingSchema,
@@ -7,11 +6,11 @@ import {
 	createOrganizationSchema,
 	updateOrganizationSchema,
 } from '../types/zendesk'
-import { createTool } from '../utils/tool-registry'
+import { createTool, type ZendeskToolDefinition } from './create-tool'
 import { requireChanges } from '../utils/require-changes'
 import { executeSearchWithStandardizedResponse } from '../utils/search-response'
 
-export const organizationsTools: ToolDefinition[] = [
+export const organizationsTools: ZendeskToolDefinition[] = [
 	createTool(
 		'list_organizations',
 		'read',

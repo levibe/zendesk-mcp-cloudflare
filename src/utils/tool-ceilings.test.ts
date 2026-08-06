@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parse } from 'jsonc-parser'
-import { toolCategories } from '../tools'
 import { isWithinCeiling, resolveCeilings } from './tool-ceilings'
-import wranglerJsonc from '../../wrangler.jsonc?raw'
 
 const GROUPS = ['tickets', 'macros'] as const
 
@@ -79,34 +76,5 @@ describe('resolveCeilings', () => {
 
 		expect(resolved.ceilings).toEqual(allRead)
 		expect(resolved.error).toContain('macros')
-	})
-})
-
-/**
- * The shipped config, held to the code it configures. Fail-closed is silent in production —
- * a malformed var deploys fine and every write quietly vanishes — so this test is what makes
- * a bad TOOL_CEILINGS fail `validate` before it can deploy, and it parses wrangler.jsonc
- * itself rather than a copy of it.
- */
-describe('the TOOL_CEILINGS wrangler.jsonc ships', () => {
-	const shipped = () => {
-		const config = parse(wranglerJsonc) as { vars: { TOOL_CEILINGS: unknown } }
-
-		return resolveCeilings(config.vars.TOOL_CEILINGS, Object.keys(toolCategories))
-	}
-
-	it('resolves against the real tool groups without falling closed', () => {
-		expect(shipped().error).toBeUndefined()
-	})
-
-	// Deliberately pinned: macros at stage and nothing else above read is the shipped policy,
-	// so raising any ceiling has to arrive as an edit to this test that somebody justifies.
-	it('permits staging macros and nothing else beyond reads', () => {
-		const { ceilings } = shipped()
-
-		expect(ceilings.macros).toBe('stage')
-
-		const raised = Object.entries(ceilings).filter(([, ceiling]) => ceiling !== 'read')
-		expect(raised).toEqual([['macros', 'stage']])
 	})
 })

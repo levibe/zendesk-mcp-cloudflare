@@ -1,5 +1,4 @@
 import { z } from 'zod'
-import type { ToolDefinition } from '../types/zendesk'
 import {
 	paginationSchema,
 	sortingSchema,
@@ -8,11 +7,11 @@ import {
 	createUserSchema,
 	updateUserSchema,
 } from '../types/zendesk'
-import { createTool } from '../utils/tool-registry'
+import { createTool, type ZendeskToolDefinition } from './create-tool'
 import { requireChanges } from '../utils/require-changes'
 import { executeSearchWithStandardizedResponse } from '../utils/search-response'
 
-export const usersTools: ToolDefinition[] = [
+export const usersTools: ZendeskToolDefinition[] = [
 	createTool(
 		'list_users',
 		'read',

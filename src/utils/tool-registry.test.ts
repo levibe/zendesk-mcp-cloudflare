@@ -2,19 +2,33 @@
  * Registration is the only thing standing between a write tool and a client, so what it
  * publishes is a security boundary rather than a detail of how tools are wired together.
  * A tool that is defined but never registered cannot be called; one that slips through can.
+ *
+ * Everything here is pure registry behavior, driven through a stub client — the registry
+ * never calls into the client, it only binds it. The tests that hold this repo's shipped
+ * surface still — the pinned inventory, and the announcement over the real manifest — live
+ * in `src/tool-ceilings-config.test.ts`, because they are coupled to wrangler.jsonc and
+ * `toolCategories` rather than to the registry.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MockInstance } from 'vitest'
-import { parse } from 'jsonc-parser'
 import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/server'
-import type { ZendeskClient } from '../zendesk-client'
-import type { McpToolResponse, ToolDefinition } from '../types/zendesk'
-import { toolCategories } from '../tools'
-import { resolveCeilings, type DeclarableLevel } from './tool-ceilings'
-import { announceWithheldTools, createTool, registerAllTools, registerTools } from './tool-registry'
-import wranglerJsonc from '../../wrangler.jsonc?raw'
+import type { McpToolResponse, ToolDefinition } from '../types/mcp'
+import type { DeclarableLevel } from './tool-ceilings'
+import {
+	announceWithheldTools,
+	registerAllTools,
+	registerTools,
+	toolFactory,
+} from './tool-registry'
+
+/** The registry never calls into the client — it only binds it — so a marker type serves. */
+type StubClient = { readonly kind: 'stub' }
+
+const stubClient: StubClient = { kind: 'stub' }
+
+const createTool = toolFactory<StubClient>()
 
 const stubServer = () => ({ registerTool: vi.fn() })
 
@@ -23,9 +37,9 @@ type StubbedServer = ReturnType<typeof stubServer>
 /** A `delete` ceiling publishes everything, for the tests where publication is not the subject. */
 const register = (
 	server: StubbedServer,
-	tools: ToolDefinition[],
+	tools: ToolDefinition<StubClient>[],
 	ceiling: DeclarableLevel = 'delete'
-) => registerTools(server as unknown as McpServer, {} as ZendeskClient, tools, ceiling)
+) => registerTools(server as unknown as McpServer, stubClient, tools, ceiling)
 
 const publishedBy = (server: StubbedServer): string[] =>
 	server.registerTool.mock.calls.map(([name]) => name as string)
@@ -46,17 +60,6 @@ const textOf = (response: McpToolResponse) => response.content[0].text
 /** A tool of the given level that does nothing, since only its level decides its fate here. */
 const levelledTool = (name: string, level: DeclarableLevel = 'read') =>
 	createTool(name, level, `The ${name} tool`, {}, async () => ({}))
-
-/**
- * The ceilings the production worker actually ships, read from wrangler.jsonc itself rather
- * than restated here — restating them would let the file and the test drift apart, and the
- * drift is exactly what the pinned inventory below exists to catch.
- */
-const shippedCeilings = () => {
-	const config = parse(wranglerJsonc) as { vars: { TOOL_CEILINGS: unknown } }
-
-	return resolveCeilings(config.vars.TOOL_CEILINGS, Object.keys(toolCategories))
-}
 
 describe('registerTools', () => {
 	it('publishes a tool whose level sits at or under the ceiling', () => {
@@ -215,77 +218,7 @@ describe('registerTools', () => {
 	})
 })
 
-describe('registerAllTools, under the ceilings wrangler.jsonc actually ships', () => {
-	const publishShipped = () => {
-		const server = stubServer()
-		registerAllTools(
-			server as unknown as McpServer,
-			{} as ZendeskClient,
-			toolCategories,
-			shippedCeilings().ceilings
-		)
-		return publishedBy(server)
-	}
-
-	// The pinned inventory, and the review choke point the old central allowlist used to be.
-	// Under ceilings, a level annotation in a tool file can publish itself into any group whose
-	// ceiling already covers it, and that diff reads as routine plumbing — so the published
-	// surface is asserted here exactly, in order, and any change to it has to arrive as an
-	// explicit edit to this list that somebody justifies. The order matters too: it is the
-	// deterministic tool list the tools/list cache reasoning leans on.
-	it('publishes exactly the shipped surface, in registration order', () => {
-		expect(publishShipped()).toEqual([
-			'list_tickets',
-			'get_ticket',
-			'search_tickets',
-			'list_users',
-			'get_user',
-			'search_users',
-			'list_organizations',
-			'get_organization',
-			'search_organizations',
-			'list_groups',
-			'get_group',
-			'list_macros',
-			'get_macro',
-			'create_macro',
-			'update_macro',
-			'list_views',
-			'get_view',
-			'list_triggers',
-			'get_trigger',
-			'list_automations',
-			'get_automation',
-			'search',
-			'list_articles',
-			'get_article',
-			'search_articles',
-			'list_categories',
-			'get_category',
-			'search_categories',
-			'list_sections',
-			'get_section',
-			'search_sections',
-			'get_help_center_hierarchy',
-			'list_articles_by_section',
-			'support_info',
-			'get_talk_stats',
-			'list_chats',
-		])
-	})
-
-	it('reports every withheld name back to the caller', () => {
-		const withheld = registerAllTools(
-			stubServer() as unknown as McpServer,
-			{} as ZendeskClient,
-			toolCategories,
-			shippedCeilings().ceilings
-		)
-
-		expect(withheld).toContain('delete_ticket')
-		expect(withheld).not.toContain('create_macro')
-	})
-
+describe('registerAllTools', () => {
 	// The runtime backstop for a category that lands in toolCategories before the shipped
 	// TOOL_CEILINGS names it. The config test fails validate on that drift; this is what the
 	// deployed worker does in the meantime, and it has to fail closed rather than open.
@@ -294,7 +227,7 @@ describe('registerAllTools, under the ceilings wrangler.jsonc actually ships', (
 
 		registerAllTools(
 			server as unknown as McpServer,
-			{} as ZendeskClient,
+			stubClient,
 			{ widgets: [levelledTool('list_widgets', 'read'), levelledTool('create_widget', 'stage')] },
 			{}
 		)
@@ -314,14 +247,6 @@ describe('announceWithheldTools', () => {
 		error = vi.spyOn(console, 'error').mockImplementation(() => {})
 	})
 
-	it('names every ceiling and what those ceilings withheld', () => {
-		announceWithheldTools(toolCategories, shippedCeilings())
-
-		expect(log).toHaveBeenCalledWith(expect.stringContaining('macros=stage'))
-		expect(log).toHaveBeenCalledWith(expect.stringContaining('tickets=read'))
-		expect(log).toHaveBeenCalledWith(expect.stringContaining('delete_ticket'))
-	})
-
 	it('says so when the ceilings withhold nothing', () => {
 		announceWithheldTools(
 			{ reads: [levelledTool('list_macros', 'read')] },
@@ -329,18 +254,6 @@ describe('announceWithheldTools', () => {
 		)
 
 		expect(log).toHaveBeenCalledWith(expect.stringContaining('Withholding nothing'))
-		expect(error).not.toHaveBeenCalled()
-	})
-
-	// The refusal itself is logged per affected request by the caller in src/index.ts, not
-	// here — this runs once per isolate, so erroring from it would understate a config that
-	// is broken right now. The announcement's job is naming the fallback the refusal caused.
-	it('announces the read-only fallback of a refused config without logging the refusal', () => {
-		const refused = resolveCeilings(undefined, Object.keys(toolCategories))
-
-		announceWithheldTools(toolCategories, refused)
-
-		expect(log).toHaveBeenCalledWith(expect.stringContaining('macros=read'))
 		expect(error).not.toHaveBeenCalled()
 	})
 

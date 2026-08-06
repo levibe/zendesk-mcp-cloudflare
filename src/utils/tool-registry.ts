@@ -1,7 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/server'
 import { z, type ZodRawShape } from 'zod'
-import type { ZendeskClient } from '../zendesk-client'
-import type { InferParams, ToolDefinition } from '../types/zendesk'
+import type { InferParams, ToolDefinition } from '../types/mcp'
 import { isWithinCeiling, type DeclarableLevel, type ResolvedCeilings } from './tool-ceilings'
 import { withErrorHandling } from './error-handling'
 
@@ -24,10 +23,10 @@ const ceilingFor = (ceilings: ResolvedCeilings['ceilings'], group: string): Decl
  * withheld here cannot be called by any client, whatever the tool list a client cached
  * happens to say.
  */
-export const registerTools = (
+export const registerTools = <C>(
 	server: McpServer,
-	client: ZendeskClient,
-	tools: ToolDefinition[],
+	client: C,
+	tools: ToolDefinition<C>[],
 	ceiling: DeclarableLevel
 ): string[] => {
 	const withheld: string[] = []
@@ -68,10 +67,10 @@ export const registerTools = (
  * tool list the `tools/list` cache reasoning leans on falls out of that, so do not regroup
  * this by level or ceiling.
  */
-export const registerAllTools = (
+export const registerAllTools = <C>(
 	server: McpServer,
-	client: ZendeskClient,
-	toolCategories: Record<string, ToolDefinition[]>,
+	client: C,
+	toolCategories: Record<string, ToolDefinition<C>[]>,
 	ceilings: ResolvedCeilings['ceilings']
 ): string[] =>
 	Object.entries(toolCategories).flatMap(([group, tools]) =>
@@ -92,8 +91,8 @@ export const registerAllTools = (
  * config that is broken right now deserves a line on every request it affects, so the caller
  * logs the refusal on the request path instead.
  */
-export const announceWithheldTools = (
-	toolCategories: Record<string, ToolDefinition[]>,
+export const announceWithheldTools = <C>(
+	toolCategories: Record<string, ToolDefinition<C>[]>,
 	resolved: ResolvedCeilings
 ): void => {
 	const ceilingsNamed = Object.entries(resolved.ceilings)
@@ -115,7 +114,13 @@ export const announceWithheldTools = (
 }
 
 /**
- * Creates a tool definition, deriving the handler's parameters from the schema.
+ * Makes an app's `createTool`, deriving each handler's parameters from its schema.
+ *
+ * Curried on the client type because inference cannot recover it from a call site: the
+ * handler's `client` parameter is an input, and an inline handler leaves it for the compiler
+ * to fill in rather than stating a type inference could read. So each app binds the factory
+ * once — `export const createTool = toolFactory<ZendeskClient>()` — and every tool definition
+ * stays exactly as it would be with a concrete `createTool`, no type arguments at call sites.
  *
  * `level` is the tool's declared reach, and declaring it is a deliberate act of
  * classification — see `tool-ceilings.ts` for the vocabulary and `ToolDefinition` for why
@@ -137,18 +142,20 @@ export const announceWithheldTools = (
  * to report, returns the sentence as a string and leaves this unset: `withErrorHandling` passes
  * a string through untouched and never consults the message.
  */
-export const createTool = <S extends ZodRawShape>(
-	name: string,
-	level: DeclarableLevel,
-	description: string,
-	schema: S,
-	handler: (client: ZendeskClient, params: InferParams<S>) => Promise<unknown>,
-	successMessage?: string
-): ToolDefinition => ({
-	name,
-	level,
-	description,
-	schema,
-	handler: handler as ToolDefinition['handler'],
-	successMessage,
-})
+export const toolFactory =
+	<C>() =>
+	<S extends ZodRawShape>(
+		name: string,
+		level: DeclarableLevel,
+		description: string,
+		schema: S,
+		handler: (client: C, params: InferParams<S>) => Promise<unknown>,
+		successMessage?: string
+	): ToolDefinition<C> => ({
+		name,
+		level,
+		description,
+		schema,
+		handler: handler as ToolDefinition<C>['handler'],
+		successMessage,
+	})

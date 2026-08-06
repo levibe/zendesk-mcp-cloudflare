@@ -1,8 +1,12 @@
 /**
- * The two checks the client makes on its inputs — the subdomain it sanitizes and the ids it
- * validates — and its retry policy all sit on the path from a tool argument to an outbound
- * request, so these drive them the way a tool does: through the public methods, against a
- * stubbed fetch, rather than reaching past `private`.
+ * What the Zendesk client adds on top of the transport: the subdomain it sanitizes, the ids
+ * it validates, the credential closure it hands `HttpClient`, and the one doorway (`send`)
+ * every API method goes through. All of it sits on the path from a tool argument to an
+ * outbound request, so these drive it the way a tool does: through the public methods,
+ * against a stubbed fetch, rather than reaching past `private`.
+ *
+ * The transport's own behaviour — retry policy, deadline, Retry-After, redirects, timeouts —
+ * is covered in utils/http-client.test.ts, where it moved with the code (#93).
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -32,26 +36,6 @@ const jsonResponse = (body: unknown) =>
 
 const failedResponse = (status: number, body: string) => new Response(body, { status })
 
-/** Three seconds, in the numeric form Zendesk actually sends. */
-const retryAfter = { 'retry-after': '3' }
-
-/**
- * A response whose status arrives but whose body does not. The headers are in hand and the
- * stream then errors, which is how a connection dropped mid-body reaches the client.
- */
-const unreadableResponse = (status: number) =>
-	new Response(
-		new ReadableStream({
-			start(controller) {
-				controller.error(new TypeError('body stream error'))
-			},
-		}),
-		{ status }
-	)
-
-const redirectResponse = (status: number, location?: string) =>
-	new Response(null, { status, headers: location ? { location } : {} })
-
 /**
  * A Response body can only be read once, so `respond` is called per attempt rather than a
  * single Response being reused — a retry test would otherwise fail on a spent body.
@@ -64,24 +48,6 @@ const stubFetch = (respond: (url: string, init: SentRequest) => Promise<Response
 
 const urlOf = (fetchMock: ReturnType<typeof stubFetch>, call = 0) => fetchMock.mock.calls[call][0]
 const sent = (fetchMock: ReturnType<typeof stubFetch>, call = 0) => fetchMock.mock.calls[call][1]
-
-/**
- * A request that never answers, rejecting the way fetch does once its signal is aborted.
- *
- * Both Node and workerd reject with a DOMException rather than a renamed Error, and that it
- * is an Error at all is what lets causeChain walk to it, so the real type is pinned here.
- * The wording is workerd's, taken from a probe against the runtime rather than guessed —
- * note it has no trailing full stop, where Node's does.
- */
-const stubUnanswered = () =>
-	stubFetch(
-		(_url, init) =>
-			new Promise<Response>((_resolve, reject) => {
-				init.signal.addEventListener('abort', () => {
-					reject(new DOMException('The operation was aborted', 'AbortError'))
-				})
-			})
-	)
 
 /**
  * Advances past both backoff waits. They are ranges rather than fixed steps — [500, 1000]
@@ -165,30 +131,6 @@ describe('the subdomain', () => {
 	})
 })
 
-/**
- * There used to be a sanitizer rewriting this path, and five tests here describing what it
- * rewrote. It is gone, so what is left to pin is the property that made it pointless: the path
- * an API method writes is the path that goes out, and the only part of it a caller can move is
- * an id that `validateId` has already checked.
- *
- * One test rather than none, because reinstating a rewriting step would be invisible otherwise.
- * Every endpoint in the client is already well formed, so a filter added back would leave all
- * of them untouched and nothing else in this file would notice.
- */
-describe('the endpoint path', () => {
-	it('is sent exactly as the calling method wrote it', async () => {
-		const fetchMock = stubFetch(async () => jsonResponse({}))
-
-		// A doubled slash, which no method in the client would ever write. It is here because
-		// the old sanitizer would have collapsed it, so this is the assertion that fails if
-		// one is put back — a well-formed path would survive a filter unchanged and prove
-		// nothing.
-		await client.request('GET', '/tickets//42.json')
-
-		expect(new URL(urlOf(fetchMock)).pathname).toBe('/api/v2/tickets//42.json')
-	})
-})
-
 describe('id validation', () => {
 	it.each([
 		['zero', 0],
@@ -213,42 +155,59 @@ describe('id validation', () => {
 	})
 })
 
-describe('request', () => {
-	it('authenticates with the email/token form of basic auth', async () => {
-		const fetchMock = stubFetch(async () => jsonResponse({}))
+/**
+ * The credential closure the constructor hands `HttpClient`. It throws from `authHeader`,
+ * which the transport calls outside its try — so a bad credential is a plain, never-retried
+ * error, and these assert that end to end through a real API method.
+ */
+describe('the credentials', () => {
+	it('authenticate with the email/token form of basic auth', async () => {
+		const fetchMock = stubFetch(async () => jsonResponse({ tickets: [] }))
 
-		await client.request('GET', '/tickets.json')
+		await client.listTickets()
 
 		expect(sent(fetchMock).headers.Authorization).toBe(
 			`Basic ${btoa('agent@example.com/token:secret-token')}`
 		)
 	})
 
-	it('appends query parameters and drops the ones with no value', async () => {
+	// A missing credential also produces no status, so it would be indistinguishable from a
+	// lost connection if the transport wrapped it. It is thrown from `authHeader` for exactly
+	// this reason: three seconds of backoff cannot conjure a token that was never set.
+	it('do not retry when one is missing', async () => {
 		const fetchMock = stubFetch(async () => jsonResponse({}))
+		const unconfigured = new ZendeskClient({ ...credentials, apiToken: '' })
 
-		await client.request('GET', '/tickets.json', null, {
-			page: 2,
-			sort_by: 'created_at',
-			per_page: undefined,
-			status: null,
-		})
+		await expect(unconfigured.listTickets()).rejects.toThrow('Zendesk credentials not configured')
 
-		const { searchParams } = new URL(urlOf(fetchMock))
-		expect(searchParams.get('page')).toBe('2')
-		expect(searchParams.get('sort_by')).toBe('created_at')
-		expect(searchParams.has('per_page')).toBe(false)
-		expect(searchParams.has('status')).toBe(false)
+		expect(fetchMock).not.toHaveBeenCalled()
 	})
 
-	it('sends no body on a GET', async () => {
+	/**
+	 * The same shape as the missing credential above. `btoa` rejects any credential holding a
+	 * character outside Latin-1, which is what a token pasted with a smart quote looks like.
+	 * Wrapped as a ZendeskRequestError it would be indistinguishable from a dropped connection
+	 * and asked three times over; staying a plain error is the mechanism, so that is what this
+	 * asserts, alongside fetch never being reached and no timer being left behind.
+	 */
+	it('do not retry a token btoa cannot encode', async () => {
 		const fetchMock = stubFetch(async () => jsonResponse({}))
+		// A smart quote, which is what a token pasted out of a document or a chat carries.
+		const smartQuoted = new ZendeskClient({ ...credentials, apiToken: 'abc’def' })
 
-		await client.request('GET', '/tickets.json', { subject: 'ignored' })
+		const failure = smartQuoted.listTickets()
 
-		expect(sent(fetchMock).body).toBeUndefined()
+		// Pinned by name rather than left at "something threw", so that an unrelated failure
+		// inside the retry loop cannot pass as this one. The name is the stable half of a
+		// DOMException across Node and workerd; the message wording is not.
+		await expect(failure).rejects.toHaveProperty('name', 'InvalidCharacterError')
+		await expect(failure).rejects.not.toBeInstanceOf(ZendeskRequestError)
+		expect(fetchMock).not.toHaveBeenCalled()
+		expect(vi.getTimerCount()).toBe(0)
 	})
+})
 
+describe('the request an API method makes', () => {
 	it('serializes the body on a POST', async () => {
 		const fetchMock = stubFetch(async () => jsonResponse({}))
 
@@ -266,568 +225,6 @@ describe('request', () => {
 
 		await expect(client.deleteTicket(42)).resolves.toEqual({ success: true })
 	})
-
-	it('turns a non-2xx into an error carrying the status and the body', async () => {
-		stubFetch(async () => failedResponse(404, '{"error":"RecordNotFound"}'))
-
-		await expect(client.request('GET', '/tickets/42.json')).rejects.toThrow(
-			'Zendesk request failed: Zendesk API Error: 404 - {"error":"RecordNotFound"}'
-		)
-	})
-
-	// The status is what the retry policy classifies on, so it has to survive the rewrap that
-	// turns the failure into a sentence. Asserting it here is asserting the thing that makes
-	// requestWithRetry able to tell a 429 from a body that quotes one.
-	it('carries the status Zendesk answered with', async () => {
-		stubFetch(async () => failedResponse(429, 'Number of allowed API requests per minute'))
-
-		const failure = client.request('GET', '/tickets.json')
-
-		await expect(failure).rejects.toBeInstanceOf(ZendeskRequestError)
-		await expect(failure).rejects.toHaveProperty('status', 429)
-	})
-
-	it('carries the status even when the body it answered with will not parse', async () => {
-		stubFetch(
-			async () =>
-				new Response('<html>maintenance</html>', {
-					headers: { 'content-type': 'application/json' },
-				})
-		)
-
-		const failure = client.request('GET', '/tickets.json')
-
-		await expect(failure).rejects.toThrow('Zendesk answered 200 with a body that is not valid JSON')
-		await expect(failure).rejects.toHaveProperty('status', 200)
-	})
-
-	// Every branch that raises once a response is in hand goes through one helper built from that
-	// response, so none of them can leave the status off — there is no argument to omit. The
-	// point of the table is that it holds for a branch nobody had this invariant in mind while
-	// writing, which is how all four of the instances in #56 got there.
-	//
-	// `Retry-After` comes along on all three, including the two whose status can never be
-	// retried. That is the uniformity being asserted rather than a claim it is useful: reading
-	// the header everywhere is what stops a site deciding it does not need one, which is exactly
-	// how the JSON-parse branch came to omit it.
-	it.each([
-		['a refusal', 429, () => new Response('rate limited', { status: 429, headers: retryAfter })],
-		['a redirect', 301, () => new Response(null, { status: 301, headers: retryAfter })],
-		[
-			'a body that will not parse',
-			200,
-			() =>
-				new Response('<html>', {
-					headers: { ...retryAfter, 'content-type': 'application/json' },
-				}),
-		],
-	])(
-		'carries the status and Retry-After of the response behind %s',
-		async (_label, status, response) => {
-			stubFetch(async () => response())
-
-			const failure = client.request('GET', '/tickets.json')
-
-			await expect(failure).rejects.toBeInstanceOf(ZendeskRequestError)
-			await expect(failure).rejects.toHaveProperty('status', status)
-			await expect(failure).rejects.toHaveProperty('retryAfterMs', 3_000)
-		}
-	)
-
-	it('leaves the status unset when the request never got an answer', async () => {
-		stubFetch(async () => {
-			throw new TypeError('fetch failed')
-		})
-
-		const failure = client.request('GET', '/tickets.json')
-
-		await expect(failure).rejects.toBeInstanceOf(ZendeskRequestError)
-		await expect(failure).rejects.toHaveProperty('status', undefined)
-	})
-
-	// `request` rewraps every failure, so the Zendesk error itself survives only as the cause.
-	// Two things downstream read it back out, and asserting only on the message above would let
-	// them drift apart from this unnoticed. `executeSearchWithStandardizedResponse` puts the
-	// cause in the structured record it logs for Workers observability, and `isRetryableError`
-	// walks the whole chain looking for the link that carries a status. Dropping the cause would
-	// strip the real reason out of every failed search and leave the retry policy classifying a
-	// refusal it can no longer see.
-	it('keeps the underlying error as the cause of the one it throws', async () => {
-		stubFetch(async () => failedResponse(404, '{"error":"RecordNotFound"}'))
-
-		await expect(client.request('GET', '/tickets/42.json')).rejects.toHaveProperty(
-			'cause.message',
-			'Zendesk API Error: 404 - {"error":"RecordNotFound"}'
-		)
-	})
-})
-
-/**
- * Confirmed against workerd before any of this was written, rather than read off the flag's
- * documentation: under `follow`, a hop from 127.0.0.1 to localhost arrived carrying no
- * Authorization header at all, and under `manual` the 301 came back intact with `Location`
- * readable — not the opaque status-0 response a browser would hand back. The fix depends on
- * both of those, so they were worth establishing rather than assuming.
- */
-describe('a redirect', () => {
-	it('is not followed', async () => {
-		const fetchMock = stubFetch(async () => jsonResponse({ tickets: [] }))
-
-		await client.listTickets()
-
-		expect(sent(fetchMock).redirect).toBe('manual')
-	})
-
-	// The whole point of #39: this used to be a 401 carrying a Zendesk authentication-error
-	// body, which reads exactly like a revoked token and names nothing worth acting on.
-	it('to another host names that host and the secret to change', async () => {
-		stubFetch(async () => redirectResponse(301, 'https://renamed.zendesk.com/api/v2/tickets.json'))
-
-		await expect(client.request('GET', '/tickets.json')).rejects.toThrow(
-			/redirected to renamed\.zendesk\.com\..*does not survive a hop to another host.*update ZENDESK_SUBDOMAIN/s
-		)
-	})
-
-	// A same-origin redirect would have kept the credential, so it is a different problem
-	// with a different fix. Saying so keeps it from being read as the credential failure.
-	it('to the same host says so instead', async () => {
-		stubFetch(async () => redirectResponse(307, '/api/v2/tickets.json?page=2'))
-
-		await expect(client.request('GET', '/tickets.json')).rejects.toThrow(
-			'redirected to /api/v2/tickets.json on the same host'
-		)
-	})
-
-	it('with no destination still fails rather than reporting an empty body', async () => {
-		stubFetch(async () => redirectResponse(302))
-
-		await expect(client.request('GET', '/tickets.json')).rejects.toThrow(
-			'redirected without naming a destination'
-		)
-	})
-
-	it('carries the status it answered with', async () => {
-		stubFetch(async () => redirectResponse(301, 'https://renamed.zendesk.com/'))
-
-		await expect(client.request('GET', '/tickets.json')).rejects.toHaveProperty('status', 301)
-	})
-
-	// It carries a status, so it is classified as an answer Zendesk gave rather than as a
-	// request that never completed. 3xx is not in the retryable set, so it is asked once.
-	it('is not retried', async () => {
-		const fetchMock = stubFetch(async () =>
-			redirectResponse(301, 'https://renamed.zendesk.com/api/v2/tickets.json')
-		)
-
-		await expect(client.requestWithRetry('GET', '/tickets.json')).rejects.toThrow('redirected to')
-
-		expect(fetchMock).toHaveBeenCalledTimes(1)
-	})
-})
-
-describe('the 30 second timeout', () => {
-	it('aborts a request that has not answered', async () => {
-		stubUnanswered()
-
-		const attempt = client.request('GET', '/tickets.json')
-		const rejects = expect(attempt).rejects.toThrow(
-			'Zendesk request failed: The operation was aborted'
-		)
-
-		await vi.advanceTimersByTimeAsync(29_999)
-		await vi.advanceTimersByTimeAsync(1)
-		await rejects
-	})
-
-	it('leaves no timer behind after a request succeeds', async () => {
-		stubFetch(async () => jsonResponse({ tickets: [] }))
-
-		await client.request('GET', '/tickets.json')
-
-		expect(vi.getTimerCount()).toBe(0)
-	})
-
-	it('leaves no timer behind after the server answers with an error', async () => {
-		stubFetch(async () => failedResponse(500, 'boom'))
-
-		await expect(client.request('GET', '/tickets.json')).rejects.toThrow()
-
-		expect(vi.getTimerCount()).toBe(0)
-	})
-
-	// The two above clear their timer on the line straight after `await fetch`, which is
-	// reached whenever fetch answered at all. This is the one path that gets there through
-	// the `finally` instead — fetch rejecting outright — and it is the path requestWithRetry
-	// walks three times per call, so a leak here strands three live 30s timers in the isolate.
-	it('leaves no timer behind when fetch itself rejects', async () => {
-		stubFetch(async () => {
-			throw new Error('fetch failed: ECONNRESET')
-		})
-
-		await expect(client.request('GET', '/tickets.json')).rejects.toThrow('ECONNRESET')
-
-		expect(vi.getTimerCount()).toBe(0)
-	})
-})
-
-describe('requestWithRetry', () => {
-	// 408 is here because it means the request timed out on Zendesk's side. The old classifier
-	// retried it only when the response body happened to contain the word "timeout", so an
-	// empty-bodied 408 was dropped — this makes it the same answer either way.
-	it.each([408, 429, 502, 503, 504])(
-		'retries a %i and gives up after three attempts',
-		async (status) => {
-			const fetchMock = stubFetch(async () => failedResponse(status, 'transient'))
-
-			const attempt = client.requestWithRetry('GET', '/tickets.json')
-			const rejects = expect(attempt).rejects.toThrow(`Zendesk API Error: ${status}`)
-			await drainBackoff()
-			await rejects
-
-			expect(fetchMock).toHaveBeenCalledTimes(3)
-		}
-	)
-
-	/**
-	 * The shapes a failed connection actually arrives in. They differ by runtime and share
-	 * nothing worth matching on, which is the whole of #29.
-	 *
-	 * The first two are undici's, as Node and Vitest produce them — a bare "fetch failed" with
-	 * the real socket error as its cause, carrying the `code` the old classifier looked for.
-	 * The rest were probed against workerd, which is what actually serves production: an
-	 * unreachable port is a plain `Error` reading "Network connection lost." with no `code` at
-	 * all, and a host that will not resolve is an opaque reference id. None of the last three
-	 * matched anything the old rule knew about, so all three went unretried where it counted.
-	 *
-	 * What they do share is that no response came back, and that is now what is asked.
-	 */
-	it.each([
-		[
-			'undici reporting a reset socket',
-			() =>
-				new TypeError('fetch failed', {
-					cause: Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }),
-				}),
-		],
-		[
-			'undici reporting a refused connection',
-			() =>
-				new TypeError('fetch failed', {
-					cause: Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }),
-				}),
-		],
-		['workerd losing the connection', () => new Error('Network connection lost.')],
-		[
-			'workerd failing to resolve the host',
-			() => new Error('internal error; reference = lfgpejlogahfrh23do9e5eib'),
-		],
-		// This one inverted with #29, and the inversion is the point. It used to assert a
-		// single attempt, on the grounds that there was no code to go on — which describes
-		// every dropped connection workerd will ever report.
-		['a bare fetch failure with nothing beneath it', () => new TypeError('fetch failed')],
-	])('retries %s', async (_label, makeError) => {
-		const fetchMock = stubFetch(async () => {
-			throw makeError()
-		})
-
-		const attempt = client.requestWithRetry('GET', '/tickets.json')
-		const rejects = expect(attempt).rejects.toThrow('Zendesk request failed')
-		await drainBackoff()
-		await rejects
-
-		expect(fetchMock).toHaveBeenCalledTimes(3)
-	})
-
-	// A missing credential also produces no status, so it would be indistinguishable from a
-	// lost connection if `request` still wrapped it. It is thrown before the try for exactly
-	// this reason: three seconds of backoff cannot conjure a token that was never set.
-	it('does not retry a missing credential', async () => {
-		const fetchMock = stubFetch(async () => jsonResponse({}))
-		const unconfigured = new ZendeskClient({ ...credentials, apiToken: '' })
-
-		await expect(unconfigured.requestWithRetry('GET', '/tickets.json')).rejects.toThrow(
-			'Zendesk credentials not configured'
-		)
-
-		expect(fetchMock).not.toHaveBeenCalled()
-	})
-
-	/**
-	 * The same shape as the missing credential above, and the reason the try starts where it
-	 * does rather than at the top of `request`.
-	 *
-	 * Preparing a request can fail, and none of those failures mean "nothing came back" —
-	 * they mean nothing was sent. `btoa` rejects any credential holding a character outside
-	 * Latin-1, which is what a token pasted with a smart quote looks like, and JSON.stringify
-	 * rejects a body it cannot serialize. Wrapped as ZendeskRequestErrors they would be
-	 * indistinguishable from a dropped connection and asked three times over.
-	 *
-	 * Staying a plain Error is the mechanism, so that is what these assert, alongside fetch
-	 * never being reached and no timer being left behind.
-	 */
-	it('does not retry a credential btoa cannot encode', async () => {
-		const fetchMock = stubFetch(async () => jsonResponse({}))
-		// A smart quote, which is what a token pasted out of a document or a chat carries.
-		const smartQuoted = new ZendeskClient({ ...credentials, apiToken: 'abc’def' })
-
-		const failure = smartQuoted.requestWithRetry('GET', '/tickets.json')
-
-		// Pinned by name rather than left at "something threw", so that an unrelated failure
-		// inside requestWithRetry cannot pass as this one. The name is the stable half of a
-		// DOMException across Node and workerd; the message wording is not.
-		await expect(failure).rejects.toHaveProperty('name', 'InvalidCharacterError')
-		await expect(failure).rejects.not.toBeInstanceOf(ZendeskRequestError)
-		expect(fetchMock).not.toHaveBeenCalled()
-		expect(vi.getTimerCount()).toBe(0)
-	})
-
-	it('does not retry a body that will not serialize', async () => {
-		const fetchMock = stubFetch(async () => jsonResponse({}))
-		const circular: Record<string, unknown> = {}
-		circular.self = circular
-
-		const failure = client.requestWithRetry('POST', '/tickets.json', circular)
-
-		await expect(failure).rejects.toThrow(/circular/i)
-		await expect(failure).rejects.not.toBeInstanceOf(ZendeskRequestError)
-		expect(fetchMock).not.toHaveBeenCalled()
-		expect(vi.getTimerCount()).toBe(0)
-	})
-
-	// Zendesk answered, so this is not a request that failed to complete. The status is put on
-	// the error to say so — without it, the rule above would send the request a second time,
-	// re-asking for something that already arrived because its body would not parse.
-	it('does not retry a body that will not parse', async () => {
-		const fetchMock = stubFetch(
-			async () =>
-				new Response('<html>maintenance</html>', {
-					headers: { 'content-type': 'application/json' },
-				})
-		)
-
-		await expect(client.requestWithRetry('GET', '/tickets.json')).rejects.toThrow(
-			'Zendesk answered 200 with a body that is not valid JSON'
-		)
-
-		expect(fetchMock).toHaveBeenCalledTimes(1)
-	})
-
-	// The sibling of the case above, on the failure branch rather than the success one, and
-	// the one that got missed. A body is a stream, so reading it can fail after the status is
-	// already in hand. Letting that propagate would hand the outer catch a plain Error, which
-	// it rewraps carrying no status — and the rule below reads a statusless error as a request
-	// that never got an answer, so a flatly refused 400 would go out twice more. Asserting on
-	// the count is the point; the message only shows the status survived to be reported.
-	it('does not retry a 400 whose body cannot be read', async () => {
-		const fetchMock = stubFetch(async () => unreadableResponse(400))
-
-		await expect(client.requestWithRetry('GET', '/tickets.json')).rejects.toThrow(
-			'Zendesk API Error: 400'
-		)
-
-		expect(fetchMock).toHaveBeenCalledTimes(1)
-	})
-
-	// 500 is in here deliberately. It is a server error and it is not retried, because Zendesk
-	// uses it for faults that will fail the same way again — 502, 503 and 504 are the ones
-	// that mean the request never reached a healthy backend.
-	it.each([400, 401, 403, 404, 422, 500])('does not retry a %i', async (status) => {
-		const fetchMock = stubFetch(async () => failedResponse(status, 'refused'))
-
-		await expect(client.requestWithRetry('GET', '/tickets.json')).rejects.toThrow(
-			`Zendesk API Error: ${status}`
-		)
-		expect(fetchMock).toHaveBeenCalledTimes(1)
-	})
-
-	// This was #18. The classifier used to search the error message, which `request` builds
-	// out of the response body, so three digits quoted in that body were indistinguishable
-	// from the status itself. It reads `status` now, so the body can say whatever it likes.
-	it('does not retry a 400 whose body happens to mention 502', async () => {
-		const fetchMock = stubFetch(async () =>
-			failedResponse(400, '{"description":"upstream returned 502 earlier"}')
-		)
-
-		await expect(client.requestWithRetry('GET', '/tickets.json')).rejects.toThrow(
-			'Zendesk API Error: 400'
-		)
-
-		expect(fetchMock).toHaveBeenCalledTimes(1)
-	})
-
-	// This was #17, and it inverted with #32. It used to advance step by step through three
-	// 30s attempts and two backoffs, roughly 93 seconds, precisely so the cost was visible.
-	// The deadline covers the whole call now, so a hung endpoint spends it on the first
-	// attempt and there is nothing left to retry into — 30 seconds, as it was before #24 made
-	// retrying a timeout possible. The AbortError is still two links down the chain, which is
-	// why the classifier walks `cause` rather than reading only what it was handed.
-	it('does not retry a hung request, because one attempt spends the whole deadline', async () => {
-		const fetchMock = stubUnanswered()
-
-		const attempt = client.requestWithRetry('GET', '/tickets.json')
-		const rejects = expect(attempt).rejects.toThrow('The operation was aborted')
-
-		await vi.advanceTimersByTimeAsync(30_000)
-		await rejects
-
-		expect(fetchMock).toHaveBeenCalledTimes(1)
-		expect(vi.getTimerCount()).toBe(0)
-	})
-
-	// The second attempt inherits what is left rather than starting its own 30 seconds, so
-	// the whole call still lands on the deadline instead of at 61 seconds.
-	it('gives a later attempt only the time the deadline has left', async () => {
-		// Pinned to the top of the jitter so the backoff is exactly the second the arithmetic
-		// below talks about. The assertions hold at any point in the range — the deadline is an
-		// absolute instant, so a shorter backoff just means a longer second attempt — but the
-		// comments would stop describing what ran.
-		vi.spyOn(Math, 'random').mockReturnValue(1)
-		let calls = 0
-		const fetchMock = stubFetch((_url, init) => {
-			calls += 1
-			if (calls === 1) return Promise.resolve(failedResponse(503, 'unavailable'))
-			return new Promise<Response>((_resolve, reject) => {
-				init.signal.addEventListener('abort', () => {
-					reject(new DOMException('The operation was aborted', 'AbortError'))
-				})
-			})
-		})
-
-		const attempt = client.requestWithRetry('GET', '/tickets.json')
-		const rejects = expect(attempt).rejects.toThrow('The operation was aborted')
-
-		await vi.advanceTimersByTimeAsync(1_000) // backoff, then the second attempt starts
-		expect(fetchMock).toHaveBeenCalledTimes(2)
-
-		// 29s more reaches the deadline, not 30 — the second attempt started a second late.
-		await vi.advanceTimersByTimeAsync(28_999)
-		await vi.advanceTimersByTimeAsync(1)
-		await rejects
-
-		expect(fetchMock).toHaveBeenCalledTimes(2)
-		expect(vi.getTimerCount()).toBe(0)
-	})
-
-	// The decision is taken before the sleep rather than after it. Waiting out a backoff only
-	// to send a request that gets aborted on arrival spends the one thing the caller is short
-	// of, and reports the failure a second later than it was already known.
-	it('stops instead of sleeping into a retry the deadline cannot fit', async () => {
-		const fetchMock = stubFetch(
-			() =>
-				new Promise<Response>((resolve) =>
-					setTimeout(() => resolve(failedResponse(503, 'unavailable')), 29_000)
-				)
-		)
-
-		const attempt = client.requestWithRetry('GET', '/tickets.json')
-		const rejects = expect(attempt).rejects.toThrow('Zendesk API Error: 503')
-
-		await vi.advanceTimersByTimeAsync(29_000)
-		await rejects
-
-		expect(fetchMock).toHaveBeenCalledTimes(1)
-		expect(vi.getTimerCount()).toBe(0)
-	})
-
-	/**
-	 * The ladder is jittered across the lower half of each step, so it is a range rather than a
-	 * pair of numbers and these two tests take its ends. Pinning `Math.random` is what makes
-	 * either end assertable; the alternative is a test that accepts a window, which would pass
-	 * just as happily if the spread quietly widened to something that undid the backoff.
-	 */
-	it('waits at most one second, then at most two, and never sleeps after the last attempt', async () => {
-		vi.spyOn(Math, 'random').mockReturnValue(1)
-		const fetchMock = stubFetch(async () => failedResponse(503, 'unavailable'))
-
-		const attempt = client.requestWithRetry('GET', '/tickets.json')
-		const rejects = expect(attempt).rejects.toThrow('Zendesk API Error: 503')
-
-		await vi.advanceTimersByTimeAsync(0)
-		expect(fetchMock).toHaveBeenCalledTimes(1)
-
-		await vi.advanceTimersByTimeAsync(999)
-		expect(fetchMock).toHaveBeenCalledTimes(1)
-		await vi.advanceTimersByTimeAsync(1)
-		expect(fetchMock).toHaveBeenCalledTimes(2)
-
-		await vi.advanceTimersByTimeAsync(1999)
-		expect(fetchMock).toHaveBeenCalledTimes(2)
-		await vi.advanceTimersByTimeAsync(1)
-		expect(fetchMock).toHaveBeenCalledTimes(3)
-
-		await rejects
-		expect(vi.getTimerCount()).toBe(0)
-	})
-
-	/**
-	 * The floor, which is the half of the spread worth pinning hardest. Jitter that can reach
-	 * zero is not a spread but a retry storm with extra steps, so the first wait has to stay
-	 * half a second even when the roll comes up as low as it goes.
-	 */
-	it('waits at least half of each step when the jitter rolls low', async () => {
-		vi.spyOn(Math, 'random').mockReturnValue(0)
-		const fetchMock = stubFetch(async () => failedResponse(503, 'unavailable'))
-
-		const attempt = client.requestWithRetry('GET', '/tickets.json')
-		const rejects = expect(attempt).rejects.toThrow('Zendesk API Error: 503')
-
-		await vi.advanceTimersByTimeAsync(499)
-		expect(fetchMock).toHaveBeenCalledTimes(1)
-		await vi.advanceTimersByTimeAsync(1)
-		expect(fetchMock).toHaveBeenCalledTimes(2)
-
-		await vi.advanceTimersByTimeAsync(999)
-		expect(fetchMock).toHaveBeenCalledTimes(2)
-		await vi.advanceTimersByTimeAsync(1)
-		expect(fetchMock).toHaveBeenCalledTimes(3)
-
-		await rejects
-		expect(vi.getTimerCount()).toBe(0)
-	})
-
-	/**
-	 * What the jitter is actually for, which neither end of the range shows on its own: two
-	 * callers that failed at the same instant have to come back at different ones. This is the
-	 * fan-out case in miniature — `get_help_center_hierarchy` issues a read per category and
-	 * then one per section through nested Promise.all, so a 503 fails all of them together, and
-	 * on a fixed ladder all of them would return together too.
-	 */
-	it('does not send two callers that failed together back together', async () => {
-		const rolls = [0, 1]
-		vi.spyOn(Math, 'random').mockImplementation(() => rolls.shift() ?? 0)
-		const fetchMock = stubFetch(async () => failedResponse(503, 'unavailable'))
-
-		const first = client.requestWithRetry('GET', '/tickets.json')
-		const second = client.requestWithRetry('GET', '/macros.json')
-		const settled = Promise.allSettled([first, second])
-
-		await vi.advanceTimersByTimeAsync(0)
-		expect(fetchMock).toHaveBeenCalledTimes(2)
-
-		// The one that rolled low is back at 500ms; the one that rolled high waits out the
-		// full second. Same failure, same instant, different return.
-		await vi.advanceTimersByTimeAsync(500)
-		expect(fetchMock).toHaveBeenCalledTimes(3)
-		await vi.advanceTimersByTimeAsync(500)
-		expect(fetchMock).toHaveBeenCalledTimes(4)
-
-		await drainBackoff()
-		await settled
-	})
-
-	it('stops as soon as an attempt succeeds', async () => {
-		let calls = 0
-		const fetchMock = stubFetch(async () => {
-			calls += 1
-			return calls === 1 ? failedResponse(503, 'unavailable') : jsonResponse({ tickets: [] })
-		})
-
-		const attempt = client.requestWithRetry('GET', '/tickets.json')
-		await drainBackoff()
-
-		await expect(attempt).resolves.toEqual({ tickets: [] })
-		expect(fetchMock).toHaveBeenCalledTimes(2)
-	})
 })
 
 /**
@@ -837,8 +234,8 @@ describe('requestWithRetry', () => {
  * once. The refusals a write may now retry are covered in `the per-verb retry policy` below.
  *
  * `send` is what makes that true, so what this really asks of each method is whether it went
- * through `send` at all. Nothing stops one reaching `request` or `requestWithRetry` directly
- * and choosing for itself, which is exactly what the fifty-eight methods used to do.
+ * through `send` at all. Nothing stops one reaching the transport's own methods directly and
+ * choosing for itself, which is exactly what the fifty-eight methods used to do.
  *
  * Driven off the prototype rather than a list of method names kept here, because a list kept
  * here is the same discipline that produced the split in the first place — five methods
@@ -848,26 +245,18 @@ describe('requestWithRetry', () => {
  */
 describe('which methods retry', () => {
 	/**
-	 * Everything on the prototype that does not reach Zendesk: the constructor, the request
-	 * methods and the dispatcher itself, and the private helpers — all ordinary prototype
-	 * properties at runtime, whatever TypeScript calls them.
+	 * Everything on the prototype that does not reach Zendesk — all ordinary prototype
+	 * properties at runtime, whatever TypeScript calls them. The transport's methods left the
+	 * prototype with the extraction (they live on `HttpClient` now), and `sanitizeSubdomain`
+	 * became a module function, so what remains is the constructor, the dispatcher, and the
+	 * id check.
 	 *
 	 * A denylist on purpose, and the one place in this file where that is the right shape. An
 	 * allowlist would let a new method be forgotten silently, which is the failure being fixed;
 	 * this way a new API method is covered by default, and a new private helper announces itself
 	 * by failing here until it is named.
 	 */
-	const notAnApiCall = new Set([
-		'constructor',
-		'request',
-		'requestWithRetry',
-		'send',
-		'sanitizeSubdomain',
-		'validateId',
-		'getBaseUrl',
-		'getAuthHeader',
-		'isRetryableError',
-	])
+	const notAnApiCall = new Set(['constructor', 'send', 'validateId'])
 
 	const apiMethods = Object.getOwnPropertyNames(ZendeskClient.prototype).filter(
 		(name) => !notAnApiCall.has(name)
@@ -937,7 +326,7 @@ describe('which methods retry', () => {
 /**
  * #58: a write retries the refusals that cannot have acted on it, and nothing else.
  *
- * Driven through `createTicket` and `listTickets` rather than through `requestWithRetry` with a
+ * Driven through `createTicket` and `listTickets` rather than through the transport with a
  * verb argument, because the thing worth pinning is what an API method actually gets — the
  * dispatch in `send` and the classifier agreeing is the whole of the feature, and a test that
  * called the retry loop directly would pass with `send` routing writes anywhere at all.
@@ -1004,158 +393,5 @@ describe('the per-verb retry policy', () => {
 
 			expect(fetchMock).toHaveBeenCalledTimes(3)
 		})
-	})
-})
-
-describe('Retry-After', () => {
-	const rateLimited = (retryAfter: string) =>
-		new Response('Number of allowed API requests per minute exceeded', {
-			status: 429,
-			headers: { 'retry-after': retryAfter },
-		})
-
-	it('is carried on the error, next to the status', async () => {
-		stubFetch(async () => rateLimited('30'))
-
-		await expect(client.request('GET', '/tickets.json')).rejects.toHaveProperty(
-			'retryAfterMs',
-			30_000
-		)
-	})
-
-	// The ladder would have asked again within a second. Retrying sooner than you were told to
-	// is worse than not retrying: it spends more of a quota already exhausted, and providers
-	// commonly extend the penalty for a caller that keeps knocking. The spread on top answers
-	// the other way of keeping knocking: the header speaks in whole seconds, so every caller
-	// refused together is told the same figure, and without the spread they would all arrive
-	// back in one burst at the reset moment. Pinned at the top of the spread here; the floor
-	// is the test below.
-	it('waits out the requested figure plus a spread instead of running its own ladder', async () => {
-		vi.spyOn(Math, 'random').mockReturnValue(1)
-		const fetchMock = stubFetch(async () => rateLimited('2'))
-
-		const attempt = client.requestWithRetry('GET', '/tickets.json')
-		const rejects = expect(attempt).rejects.toThrow('Zendesk API Error: 429')
-
-		await vi.advanceTimersByTimeAsync(2_999)
-		expect(fetchMock).toHaveBeenCalledTimes(1)
-
-		await vi.advanceTimersByTimeAsync(1)
-		expect(fetchMock).toHaveBeenCalledTimes(2)
-
-		await vi.advanceTimersByTimeAsync(3_000)
-		await rejects
-		expect(fetchMock).toHaveBeenCalledTimes(3)
-	})
-
-	// The floor of the spread window, which is the half worth pinning hardest: at its lowest
-	// roll the wait is exactly the figure Zendesk named. The spread only ever adds — a roll
-	// that could land the retry before the reset would be asking earlier than agreed, which
-	// is the thing this path exists to avoid.
-	it('never retries before the moment Zendesk named', async () => {
-		vi.spyOn(Math, 'random').mockReturnValue(0)
-		const fetchMock = stubFetch(async () => rateLimited('2'))
-
-		const attempt = client.requestWithRetry('GET', '/tickets.json')
-		const rejects = expect(attempt).rejects.toThrow('Zendesk API Error: 429')
-
-		await vi.advanceTimersByTimeAsync(1_999)
-		expect(fetchMock).toHaveBeenCalledTimes(1)
-
-		await vi.advanceTimersByTimeAsync(1)
-		expect(fetchMock).toHaveBeenCalledTimes(2)
-
-		await vi.advanceTimersByTimeAsync(2_000)
-		await rejects
-		expect(fetchMock).toHaveBeenCalledTimes(3)
-	})
-
-	// The deadline from #32 is the only cap on this, and the right one. Clamping a 60 second
-	// wait down to something Zendesk never agreed to would defeat the point of reading the
-	// header, so the honest answer to a wait that will not fit the budget is to stop.
-	it('ends the call when the wait it asks for exceeds the deadline', async () => {
-		const fetchMock = stubFetch(async () => rateLimited('60'))
-
-		await expect(client.requestWithRetry('GET', '/tickets.json')).rejects.toThrow(
-			'Zendesk API Error: 429'
-		)
-
-		expect(fetchMock).toHaveBeenCalledTimes(1)
-		expect(vi.getTimerCount()).toBe(0)
-	})
-
-	// The spread counts against the deadline the same way the wait it rides on does, because
-	// the fit check reads the delay with the spread already in it. Twenty-nine seconds fits
-	// the budget on its own; with the spread at its widest it does not, and the honest answer
-	// stays the one above — stop and say so rather than sleep into a retry that cannot run.
-	it('counts the spread against the deadline when deciding whether a retry fits', async () => {
-		vi.spyOn(Math, 'random').mockReturnValue(1)
-		const fetchMock = stubFetch(async () => rateLimited('29'))
-
-		await expect(client.requestWithRetry('GET', '/tickets.json')).rejects.toThrow(
-			'Zendesk API Error: 429'
-		)
-
-		expect(fetchMock).toHaveBeenCalledTimes(1)
-		expect(vi.getTimerCount()).toBe(0)
-	})
-
-	// Zendesk sends seconds, but the header is defined as seconds or an HTTP date, and
-	// reading only half of it without saying so is the kind of gap that gets found in
-	// production rather than here.
-	it('understands the date form as well as the seconds form', async () => {
-		vi.setSystemTime(new Date('2026-08-01T12:00:00Z'))
-		// The spread is pinned to its floor because this test is about reading the header
-		// form, and the arithmetic below should be the date's four seconds and nothing else.
-		vi.spyOn(Math, 'random').mockReturnValue(0)
-		const fetchMock = stubFetch(async () => rateLimited('Sat, 01 Aug 2026 12:00:04 GMT'))
-
-		const attempt = client.requestWithRetry('GET', '/tickets.json')
-		const rejects = expect(attempt).rejects.toThrow('Zendesk API Error: 429')
-
-		await vi.advanceTimersByTimeAsync(3_999)
-		expect(fetchMock).toHaveBeenCalledTimes(1)
-
-		await vi.advanceTimersByTimeAsync(1)
-		expect(fetchMock).toHaveBeenCalledTimes(2)
-
-		await drainBackoff()
-		await rejects
-	})
-
-	/**
-	 * None of these says anything usable about how long to wait, so the ladder answers instead.
-	 * `Math.random` is pinned to the top of the jitter so that "the ladder answered" is a single
-	 * number to assert rather than a window — what these are about is which of the two sources
-	 * decided, not what the spread does with it.
-	 *
-	 * The last three are why the guard is a positive-wait check rather than a tighter pattern.
-	 * `Date.parse` reads '-5' as May 2001 and '120' as the year 120, so it cannot be trusted
-	 * to reject nonsense on its own — and a header that resolves into the past would otherwise
-	 * mean "retry now", which against an exhausted quota is the one answer worth avoiding.
-	 */
-	it.each([
-		['a word', 'soon'],
-		['an empty header', ''],
-		['exponential notation', '1e3'],
-		['zero seconds', '0'],
-		['a negative number', '-5'],
-		['a date already past', 'Sat, 01 Aug 2026 11:59:00 GMT'],
-	])('falls back to the ladder for %s', async (_label, header) => {
-		vi.setSystemTime(new Date('2026-08-01T12:00:00Z'))
-		vi.spyOn(Math, 'random').mockReturnValue(1)
-		const fetchMock = stubFetch(async () => rateLimited(header))
-
-		const attempt = client.requestWithRetry('GET', '/tickets.json')
-		const rejects = expect(attempt).rejects.toThrow('Zendesk API Error: 429')
-
-		await vi.advanceTimersByTimeAsync(999)
-		expect(fetchMock).toHaveBeenCalledTimes(1)
-
-		await vi.advanceTimersByTimeAsync(1)
-		expect(fetchMock).toHaveBeenCalledTimes(2)
-
-		await drainBackoff()
-		await rejects
 	})
 })

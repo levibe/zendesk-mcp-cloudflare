@@ -75,9 +75,28 @@ export const coverageThresholds = {
 		functions: 100,
 		lines: 100,
 	},
-	// Raised from 85 with #54, which drives every method on the client rather than the handful
-	// a test had reached by name. Measured 92 at the time.
-	'src/zendesk-client.ts': { branches: 90 },
+	// The factory owns the two invariants that fail silently under local testing — a fresh
+	// server per request, the announcement once per isolate — so a drop here is a regression
+	// in exactly the code whose failure mode is invisible until load.
+	'src/create-mcp-worker.ts': {
+		statements: 100,
+		branches: 100,
+		functions: 100,
+		lines: 100,
+	},
+	// The transport, split out of the client with #93 and carrying the branch coverage the old
+	// { branches: 90 } on zendesk-client.ts was really protecting: the retry decisions, the
+	// deadline arithmetic, the Retry-After handling. Measured 94 at the split; the uncovered
+	// arms are the not-a-URL redirect Location, the non-Error rethrow, and the unreachable
+	// throw ending the retry loop.
+	'src/utils/http-client.ts': { branches: 90, functions: 100 },
+	// With the transport gone, the client is the constructor, the id check, and the long tail
+	// of thin senders — and the #54 prototype walk drives every one of those methods, which is
+	// what holds statements and functions at 100 structurally rather than by effort. Branches
+	// sit lower for the constructor's config-or-env fallback arms; measured 90 at the split,
+	// but that is 19 of 21 arms, so a single new arm costs almost five points — the floor
+	// sits one branch under the measurement, which is slack, not coverage given up.
+	'src/zendesk-client.ts': { statements: 100, branches: 85, functions: 100, lines: 100 },
 	'src/tools/help-center.ts': { branches: 85 },
 	// From nothing at all, with the first tests this file has ever had — its three routes, the
 	// Google exchange and the consent URL it builds.
