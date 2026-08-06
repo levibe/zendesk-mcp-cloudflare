@@ -1,5 +1,4 @@
-import { toolFactory } from '../utils/tool-registry'
-import type { ToolDefinition } from '../types/mcp'
+import { toolFactory, type ToolDefinition } from '@levibe/mcp-worker/registry'
 import type { ZendeskClient } from '../zendesk-client'
 
 /**

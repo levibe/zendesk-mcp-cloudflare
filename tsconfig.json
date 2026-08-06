@@ -5,7 +5,7 @@
 		/* Set the JavaScript language version for emitted JavaScript and include compatible library declarations. */
 		"target": "es2022",
 		/* Specify a set of bundled library declaration files that describe the target runtime environment. */
-		/* es2022 for Error.cause, which the error-handling helpers rely on. */
+		/* es2022 for Error.cause, which @levibe/mcp-worker's error handling relies on. */
 		"lib": ["es2022"],
 		/* Specify what JSX code is generated. */
 		"jsx": "react-jsx",

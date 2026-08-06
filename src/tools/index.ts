@@ -2,8 +2,8 @@
  * Defining a tool here does not publish it. Every tool declares its reach level, each group
  * below carries a ceiling in wrangler.jsonc's TOOL_CEILINGS, and registration withholds
  * whatever sits above the ceiling — so most of the create, update and delete tools below are
- * compiled and tested but never offered to a client. `registerTools` in utils/tool-registry
- * applies that policy, and `tool-ceilings.ts` holds the vocabulary.
+ * compiled and tested but never offered to a client. `registerTools` in @levibe/mcp-worker's
+ * registry applies that policy and holds the level vocabulary.
  */
 
 import { ticketsTools } from './tickets'

@@ -15,12 +15,14 @@
  *
  * Keep the numbers in this file rather than moving them back.
  *
- * Which metrics each module pins, and why:
+ * The registry, the transport, the OAuth handler and the worker factory carry
+ * their thresholds in @levibe/mcp-worker, where the code moved. What remains
+ * here is what this repo still decides, and which metrics each module pins:
  *
- * - Most of the utils and the OAuth handler are wholly covered, so they pin all
- *   four. Any drop is a regression rather than a rounding artefact. The search
- *   response helper is the exception: it pins the other three at 100 and holds
- *   branches lower, because its reshaping has arms no fixture has reached yet.
+ * - The response reshapers are wholly covered, so they pin all four and any
+ *   drop is a regression rather than a rounding artefact. The search response
+ *   helper is the exception: it pins the other three at 100 and holds branches
+ *   lower, because its reshaping has arms no fixture has reached yet.
  * - The client and the hierarchy walk pin branches alone. Their statement counts
  *   are held down by a long tail of thin methods, so a floor there would move
  *   whenever a method was added rather than when a decision stopped being
@@ -32,21 +34,6 @@
  * you lower one, because that is coverage being given up.
  */
 export const coverageThresholds = {
-	// The decode helper decides — try the bytes as UTF-8, fall back to the legacy format —
-	// and the fallback is what keeps year-old approval cookies readable, so losing its test
-	// would be losing the rollout guarantee, not a number.
-	'src/utils/base64.ts': {
-		statements: 100,
-		branches: 100,
-		functions: 100,
-		lines: 100,
-	},
-	'src/utils/error-handling.ts': {
-		statements: 100,
-		branches: 100,
-		functions: 100,
-		lines: 100,
-	},
 	'src/utils/search-response.ts': {
 		statements: 100,
 		branches: 95,
@@ -59,58 +46,12 @@ export const coverageThresholds = {
 		functions: 100,
 		lines: 100,
 	},
-	// The two halves of the publication policy: what a config resolves to, and what a ceiling
-	// publishes. Both are small and decide everything about which tools a client is offered,
-	// so any drop here is a regression in the security boundary rather than a rounding
-	// artefact.
-	'src/utils/tool-ceilings.ts': {
-		statements: 100,
-		branches: 100,
-		functions: 100,
-		lines: 100,
-	},
-	'src/utils/tool-registry.ts': {
-		statements: 100,
-		branches: 100,
-		functions: 100,
-		lines: 100,
-	},
-	// The factory owns the two invariants that fail silently under local testing — a fresh
-	// server per request, the announcement once per isolate — so a drop here is a regression
-	// in exactly the code whose failure mode is invisible until load.
-	'src/create-mcp-worker.ts': {
-		statements: 100,
-		branches: 100,
-		functions: 100,
-		lines: 100,
-	},
-	// The transport, split out of the client with #93 and carrying the branch coverage the old
-	// { branches: 90 } on zendesk-client.ts was really protecting: the retry decisions, the
-	// deadline arithmetic, the Retry-After handling. Measured 94 at the split; the uncovered
-	// arms are the not-a-URL redirect Location, the non-Error rethrow, and the unreachable
-	// throw ending the retry loop.
-	'src/utils/http-client.ts': { branches: 90, functions: 100 },
-	// With the transport gone, the client is the constructor, the id check, and the long tail
-	// of thin senders — and the #54 prototype walk drives every one of those methods, which is
-	// what holds statements and functions at 100 structurally rather than by effort. Branches
-	// sit lower for the constructor's config-or-env fallback arms; measured 90 at the split,
-	// but that is 19 of 21 arms, so a single new arm costs almost five points — the floor
-	// sits one branch under the measurement, which is slack, not coverage given up.
+	// With the transport gone to the package, the client is the constructor, the id check, and
+	// the long tail of thin senders — and the #54 prototype walk drives every one of those
+	// methods, which is what holds statements and functions at 100 structurally rather than by
+	// effort. Branches sit lower for the constructor's config-or-env fallback arms; measured 90
+	// at the split, but that is 19 of 21 arms, so a single new arm costs almost five points —
+	// the floor sits one branch under the measurement, which is slack, not coverage given up.
 	'src/zendesk-client.ts': { statements: 100, branches: 85, functions: 100, lines: 100 },
 	'src/tools/help-center.ts': { branches: 85 },
-	// From nothing at all, with the first tests this file has ever had — its three routes, the
-	// Google exchange and the consent URL it builds.
-	//
-	// It pins 100 on branches, which it could not do while the "what did this throw" ternary was
-	// written out at each of five catch sites: `atob`, `JSON.parse` and `btoa` all throw real
-	// Errors, so four of those five pairs had an arm nothing could reach. Behind one `reasonFor`
-	// helper there is a single pair, and the provider stub throwing a bare string covers it. Do
-	// not read the 100 as every path being exercised — see the note on POST /authorize, where
-	// the module mock makes coverage report a guarded and an unguarded route identically.
-	'src/google-handler.ts': {
-		statements: 100,
-		branches: 100,
-		functions: 100,
-		lines: 100,
-	},
 }

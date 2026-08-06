@@ -19,14 +19,14 @@ import type {
 	ViewCreatePayload,
 	ViewUpdatePayload,
 } from './types/zendesk'
-import { HttpClient } from './utils/http-client'
+import { HttpClient } from '@levibe/mcp-worker/http'
 
 /**
  * The transport's error under the name this client has always thrown. A re-export rather
  * than a subclass, so `instanceof` agrees wherever the error is caught — the class sets its
  * own `name` to HttpRequestError now, which only changes what a stack trace leads with.
  */
-export { HttpRequestError as ZendeskRequestError } from './utils/http-client'
+export { HttpRequestError as ZendeskRequestError } from '@levibe/mcp-worker/http'
 
 interface ZendeskClientConfig {
 	subdomain?: string
@@ -396,8 +396,8 @@ export class ZendeskClient {
 
 	// Nothing here creates, updates or deletes a category or a section. Six commented-out
 	// methods used to say so under a "DISABLED FOR SECURITY" label, which read as though the
-	// comment were the control; the ceilings gating registration in src/utils/tool-registry.ts
-	// are.
+	// comment were the control; the ceilings gating registration in @levibe/mcp-worker's
+	// registry are.
 
 	// Sections
 	async listSections(params?: Record<string, unknown>) {

@@ -12,8 +12,11 @@ import { parse } from 'jsonc-parser'
 import type { McpServer } from '@modelcontextprotocol/server'
 import type { ZendeskClient } from './zendesk-client'
 import { toolCategories } from './tools'
-import { resolveCeilings } from './utils/tool-ceilings'
-import { announceWithheldTools, registerAllTools } from './utils/tool-registry'
+import {
+	announceWithheldTools,
+	registerAllTools,
+	resolveCeilings,
+} from '@levibe/mcp-worker/registry'
 import wranglerJsonc from '../wrangler.jsonc?raw'
 
 const stubServer = () => ({ registerTool: vi.fn() })
@@ -147,9 +150,9 @@ describe('announceWithheldTools, over the manifest this repo ships', () => {
 		expect(log).toHaveBeenCalledWith(expect.stringContaining('delete_ticket'))
 	})
 
-	// The refusal itself is logged per affected request by src/create-mcp-worker.ts, not
-	// here — this runs once per isolate, so erroring from it would understate a config that
-	// is broken right now. The announcement's job is naming the fallback the refusal caused.
+	// The refusal itself is logged per affected request by createMcpWorker, not here — this
+	// runs once per isolate, so erroring from it would understate a config that is broken
+	// right now. The announcement's job is naming the fallback the refusal caused.
 	it('announces the read-only fallback of a refused config without logging the refusal', () => {
 		const refused = resolveCeilings(undefined, Object.keys(toolCategories))
 

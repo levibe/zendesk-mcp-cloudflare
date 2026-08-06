@@ -6,7 +6,7 @@
  * against a stubbed fetch, rather than reaching past `private`.
  *
  * The transport's own behaviour — retry policy, deadline, Retry-After, redirects, timeouts —
- * is covered in utils/http-client.test.ts, where it moved with the code (#93).
+ * is covered by @levibe/mcp-worker's own suite, where it lives with the code.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'

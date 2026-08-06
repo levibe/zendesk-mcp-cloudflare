@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { InferParams } from './mcp'
+import type { InferParams } from '@levibe/mcp-worker/registry'
 
 /**
  * The pagination arguments every list and search tool spreads.
@@ -265,7 +265,8 @@ export type MacroUpdatePayload = InferParams<typeof updateMacroSchema>
  * human to notice, which is what makes the rest of the rule safe to build unattended.
  *
  * This is a denylist, which is the opposite shape from tool publication in
- * utils/tool-registry, and the difference is worth understanding rather than tidying away.
+ * @levibe/mcp-worker's registry, and the difference is worth understanding rather than
+ * tidying away.
  * Publication can be an exact comparison because both of its sides — a tool's declared level,
  * a group's configured ceiling — are closed vocabularies of ours. Action fields are
  * Zendesk's and are not: a custom field action is `custom_fields_12345`, so any allowlist

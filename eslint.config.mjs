@@ -23,7 +23,7 @@ export default tseslint.config(
 			],
 			// Held at error so an unexamined `any` cannot land silently — while this warned,
 			// validate passed with any number of them in the tree, which is how 66 accumulated
-			// unnoticed before #8. The vendored OAuth helper below is the one exception.
+			// unnoticed before #8. A new `any` needs its own argued-for exemption.
 			'@typescript-eslint/no-explicit-any': 'error',
 			'@typescript-eslint/explicit-module-boundary-types': 'off',
 			'@typescript-eslint/no-non-null-assertion': 'off',
@@ -47,17 +47,17 @@ export default tseslint.config(
 		// every write handler in the tree at once. A worded confirmation is what those handlers
 		// actually wanted, and it travels as the fifth argument to `createTool`.
 		//
-		// The exemptions are the file defining it, the one call site, and tests — tests because
-		// that is where the double-wrapped shape is pinned, and nothing there ships.
+		// The bare specifiers sit beside the path glob because a subpath import of the package
+		// would slip past `**/error-handling`. Tests stay exempt: nothing there ships.
 		files: ['src/**/*.ts'],
-		ignores: ['src/utils/error-handling.ts', 'src/utils/tool-registry.ts', 'src/**/*.test.ts'],
+		ignores: ['src/**/*.test.ts'],
 		rules: {
 			'no-restricted-imports': [
 				'error',
 				{
 					patterns: [
 						{
-							group: ['**/error-handling'],
+							group: ['**/error-handling', '@levibe/mcp-worker', '@levibe/mcp-worker/*'],
 							importNames: ['withErrorHandling'],
 							message:
 								'registerTools wraps every handler in withErrorHandling already. Wrapping again encodes the response as text and drops its isError, reporting a failed write as a success — return the client result and pass a successMessage to createTool instead.',
@@ -66,13 +66,6 @@ export default tseslint.config(
 				},
 			],
 		},
-	},
-	{
-		// Vendored OAuth helper, reserved for #3 and #4 to rework. It keeps the old severity so
-		// the rest of src/ can hold no-explicit-any at error; whichever issue rewrites the file
-		// deletes this override.
-		files: ['src/workers-oauth-utils.ts'],
-		rules: { '@typescript-eslint/no-explicit-any': 'warn' },
 	},
 	// Must stay last so it switches off every formatting rule enabled above and
 	// leaves Prettier as the only thing with an opinion about layout.

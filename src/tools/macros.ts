@@ -7,7 +7,7 @@
 
 import { paginationSchema, idSchema, createMacroSchema, updateMacroSchema } from '../types/zendesk'
 import { createTool, type ZendeskToolDefinition } from './create-tool'
-import { requireChanges } from '../utils/require-changes'
+import { requireChanges } from '@levibe/mcp-worker/registry'
 
 export const macrosTools: ZendeskToolDefinition[] = [
 	createTool(

@@ -8,7 +8,7 @@ import {
 	updateUserSchema,
 } from '../types/zendesk'
 import { createTool, type ZendeskToolDefinition } from './create-tool'
-import { requireChanges } from '../utils/require-changes'
+import { requireChanges } from '@levibe/mcp-worker/registry'
 import { executeSearchWithStandardizedResponse } from '../utils/search-response'
 
 export const usersTools: ZendeskToolDefinition[] = [
