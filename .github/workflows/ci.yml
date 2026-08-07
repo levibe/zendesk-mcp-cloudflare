@@ -44,6 +44,21 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
 
+      # @levibe/mcp-worker installs from GitHub Packages, and the same-repo
+      # GITHUB_TOKEN cannot read another repository's private package, so
+      # PACKAGES_READ_TOKEN is a PAT with read:packages. The token is written
+      # into user-level config as a literal rather than referenced from the
+      # committed .npmrc, because pnpm 11 refuses to expand env-var credentials
+      # from a project-level file and then sends no auth header at all
+      # (levibe/mcp-worker#5). Chosen over setup-node's registry-url, which
+      # leans on that same expansion from a generated npmrc: one explicit step
+      # here is also the exact command Workers Builds runs before its install,
+      # so the two deploy paths authenticate the same way.
+      - name: Authenticate to GitHub Packages
+        env:
+          GITHUB_PACKAGES_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN }}
+        run: pnpm config set //npm.pkg.github.com/:_authToken "$GITHUB_PACKAGES_TOKEN"
+
       # Fails if pnpm-lock.yaml has drifted from package.json. This also runs
       # the supply-chain checks configured in pnpm-workspace.yaml against every
       # lockfile entry, on a machine with no warm verification cache.

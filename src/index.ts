@@ -1,4 +1,4 @@
-import { createMcpWorker } from './create-mcp-worker'
+import { createMcpWorker } from '@levibe/mcp-worker'
 import { ZendeskClient } from './zendesk-client'
 import { toolCategories } from './tools'
 

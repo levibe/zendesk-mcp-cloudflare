@@ -38,7 +38,7 @@ export default defineConfig({
 			// this, a module nobody tests is absent from the table rather than sitting in it
 			// at 0% — which reads as "nothing to see here" for exactly the files that need
 			// looking at. The number is meant to show where the holes are, so the untested
-			// tools and the vendored OAuth code have to be in the denominator.
+			// tools have to be in the denominator.
 			include: ['src/**/*.ts'],
 			exclude: ['src/**/*.test.ts'],
 			// Per file rather than one figure over all of src/. The overall number is

@@ -38,7 +38,12 @@ minimumReleaseAgeStrict: true
 # `agents` is here for the opposite reason, and it is the trap worth knowing about:
 # ^0.20.0 has no member old enough to pass, but asking for `agents@latest` does not
 # fail — it quietly resolves to 0.18.0, which predates createMcpHandler entirely.
+#
+# @levibe/mcp-worker is first-party: 0.1.0 published 2026-08-06 and #94 adopted it the
+# same day, so no release could clear the window. Exact-pinned, the entry expires by
+# itself: 0.1.1 goes back through the full wait.
 minimumReleaseAgeExclude:
+  - '@levibe/mcp-worker@0.1.0'
   - '@cloudflare/workers-oauth-provider@0.8.3'
   - '@modelcontextprotocol/server@2.0.0'
   - '@modelcontextprotocol/core@2.0.0'

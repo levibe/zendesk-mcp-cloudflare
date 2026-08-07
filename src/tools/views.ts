@@ -22,7 +22,7 @@ import {
 	viewConditionsSchema,
 } from '../types/zendesk'
 import { createTool, type ZendeskToolDefinition } from './create-tool'
-import { requireChanges } from '../utils/require-changes'
+import { requireChanges } from '@levibe/mcp-worker/registry'
 
 /**
  * The nested condition groups, flattened to the top-level `all`/`any` Zendesk's views API

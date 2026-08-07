@@ -61,8 +61,8 @@
 	// For local development, put the secrets in .dev.vars — see .dev.vars.example.
 	"keep_vars": true,
 	"vars": {
-		// The reach this deployment permits each tool group, resolved by `resolveCeilings` in
-		// src/utils/tool-ceilings.ts: read < stage < write < delete, and a tool is offered only
+		// The reach this deployment permits each tool group, resolved by `resolveCeilings` from
+		// @levibe/mcp-worker's registry: read < stage < write < delete, and a tool is offered only
 		// when its declared level fits under its group's ceiling. Malformed or missing, every
 		// group falls closed to read. Every group in toolCategories must be named here — a unit
 		// test parses this file and fails `validate` when the two drift.
