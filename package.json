@@ -25,7 +25,7 @@
 	},
 	"dependencies": {
 		"@cloudflare/workers-oauth-provider": "^0.8.3",
-		"@levibe/mcp-worker": "^0.1.0",
+		"@levibe/mcp-worker": "^0.2.0",
 		"@modelcontextprotocol/server": "2.0.0",
 		"agents": "^0.20.1",
 		"hono": "^4.8.3",
