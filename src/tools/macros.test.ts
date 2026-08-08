@@ -66,7 +66,7 @@ describe('the macro action schema', () => {
 	// so a bare number is the wrong shape rather than a convenience worth accepting.
 	it('turns away a numeric value', () => {
 		expect(
-			createPayload.safeParse({ title: 'Assign', actions: [{ field: 'group_id', value: 1 }] })
+			createPayload.safeParse({ title: 'Assign', actions: [{ field: 'group_id', value: 1 }] }),
 		).toMatchObject({ success: false })
 	})
 
@@ -137,7 +137,7 @@ describe('create_macro', () => {
 		const created = { macro: { id: 42, title: 'Solve' } }
 
 		expect(await call(createMacro, stubClient(created), { title: 'Solve', actions: [solve] })).toBe(
-			created
+			created,
 		)
 	})
 
@@ -172,7 +172,7 @@ describe('update_macro', () => {
 		const client = stubClient()
 
 		await expect(call(updateMacro, client, { id: 42 })).rejects.toThrow(
-			'update_macro needs at least one field to change'
+			'update_macro needs at least one field to change',
 		)
 		expect(client.updateMacro).not.toHaveBeenCalled()
 	})

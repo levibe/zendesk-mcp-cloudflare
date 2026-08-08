@@ -27,7 +27,7 @@ export const triggersTools: ZendeskToolDefinition[] = [
 		paginationSchema,
 		async (client, params) => {
 			return client.listTriggers(params)
-		}
+		},
 	),
 
 	createTool(
@@ -37,7 +37,7 @@ export const triggersTools: ZendeskToolDefinition[] = [
 		{ id: idSchema.describe('Trigger ID') },
 		async (client, { id }) => {
 			return client.getTrigger(id)
-		}
+		},
 	),
 
 	createTool(
@@ -48,7 +48,7 @@ export const triggersTools: ZendeskToolDefinition[] = [
 		async (client, params) => {
 			return client.createTrigger({ ...params, active: false })
 		},
-		'Trigger created successfully, and is inactive. Enable it in the Zendesk UI once you have read it back.'
+		'Trigger created successfully, and is inactive. Enable it in the Zendesk UI once you have read it back.',
 	),
 
 	createTool(
@@ -61,6 +61,6 @@ export const triggersTools: ZendeskToolDefinition[] = [
 
 			return client.updateTrigger(id, changes)
 		},
-		'Trigger updated successfully!'
+		'Trigger updated successfully!',
 	),
 ]

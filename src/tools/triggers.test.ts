@@ -185,7 +185,7 @@ describe('the update schema', () => {
 
 			expect(wording).toMatch(/replaces/i)
 			expect(wording).not.toBe(createTriggerSchema[field].description)
-		}
+		},
 	)
 })
 
@@ -249,7 +249,7 @@ describe('update_trigger', () => {
 		const client = stubClient()
 
 		await expect(call(updateTrigger, client, { id: 42 })).rejects.toThrow(
-			'update_trigger needs at least one field to change'
+			'update_trigger needs at least one field to change',
 		)
 		expect(client.updateTrigger).not.toHaveBeenCalled()
 	})

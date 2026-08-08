@@ -247,7 +247,7 @@ export const customTools: ZendeskToolDefinition[] = [
 		{ ...paginationSchema },
 		async (client, params) => {
 			return client.listWidgets(params)
-		}
+		},
 	),
 ]
 ```

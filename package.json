@@ -1,12 +1,8 @@
 {
 	"name": "zendesk-mcp",
 	"version": "0.2.0",
-	"type": "module",
 	"private": true,
-	"packageManager": "pnpm@11.18.0",
-	"engines": {
-		"node": ">=22.13"
-	},
+	"type": "module",
 	"scripts": {
 		"deploy": "wrangler deploy",
 		"dev": "wrangler dev",
@@ -42,5 +38,9 @@
 		"typescript-eslint": "^8.65.0",
 		"vitest": "^4.1.10",
 		"wrangler": "^4.114.0"
-	}
+	},
+	"engines": {
+		"node": ">=22.13"
+	},
+	"packageManager": "pnpm@11.18.0"
 }

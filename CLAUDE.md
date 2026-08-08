@@ -244,7 +244,7 @@ To add new Zendesk tools:
    	{ ...paginationSchema },
    	async (client, params) => {
    		return client.listWidgets(params)
-   	}
+   	},
    )
    ```
 

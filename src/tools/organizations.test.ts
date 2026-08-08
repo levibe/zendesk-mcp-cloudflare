@@ -57,7 +57,7 @@ describe('update_organization', () => {
 		const client = stubClient()
 
 		await expect(call(client, { id: 42 })).rejects.toThrow(
-			'update_organization needs at least one field to change'
+			'update_organization needs at least one field to change',
 		)
 		expect(client.updateOrganization).not.toHaveBeenCalled()
 	})

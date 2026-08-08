@@ -66,7 +66,7 @@ describe('registerAllTools, under the ceilings wrangler.jsonc actually ships', (
 			server as unknown as McpServer,
 			{} as ZendeskClient,
 			toolCategories,
-			shippedCeilings().ceilings
+			shippedCeilings().ceilings,
 		)
 		return publishedBy(server)
 	}
@@ -123,7 +123,7 @@ describe('registerAllTools, under the ceilings wrangler.jsonc actually ships', (
 			stubServer() as unknown as McpServer,
 			{} as ZendeskClient,
 			toolCategories,
-			shippedCeilings().ceilings
+			shippedCeilings().ceilings,
 		)
 
 		expect(withheld).toContain('delete_ticket')

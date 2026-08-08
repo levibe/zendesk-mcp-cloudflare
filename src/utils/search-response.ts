@@ -7,7 +7,7 @@ import { isRecord } from './narrow'
 
 export function standardizeSearchResponse(
 	rawResponse: unknown,
-	defaultResultType?: string
+	defaultResultType?: string,
 ): StandardizedSearchResponse {
 	if (!isRecord(rawResponse)) {
 		return {
@@ -81,7 +81,7 @@ export function standardizeSearchResponse(
 
 export async function executeSearchWithStandardizedResponse(
 	searchOperation: () => Promise<unknown>,
-	defaultResultType?: string
+	defaultResultType?: string,
 ): Promise<StandardizedSearchResponse> {
 	const startTime = Date.now()
 

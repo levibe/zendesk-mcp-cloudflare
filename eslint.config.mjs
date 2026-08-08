@@ -83,5 +83,5 @@ export default tseslint.config(
 			'*.cjs',
 			'*.d.ts',
 		],
-	}
+	},
 )

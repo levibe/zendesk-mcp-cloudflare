@@ -44,7 +44,7 @@ export const viewsTools: ZendeskToolDefinition[] = [
 		paginationSchema,
 		async (client, params) => {
 			return client.listViews(params)
-		}
+		},
 	),
 
 	createTool(
@@ -54,7 +54,7 @@ export const viewsTools: ZendeskToolDefinition[] = [
 		{ id: idSchema.describe('View ID') },
 		async (client, { id }) => {
 			return client.getView(id)
-		}
+		},
 	),
 
 	// A null restriction means every agent, and Zendesk documents that as the property being
@@ -72,7 +72,7 @@ export const viewsTools: ZendeskToolDefinition[] = [
 				active: false,
 			})
 		},
-		'View created successfully, and is inactive. Activate it in the Zendesk UI once you have read it back.'
+		'View created successfully, and is inactive. Activate it in the Zendesk UI once you have read it back.',
 	),
 
 	createTool(
@@ -86,9 +86,9 @@ export const viewsTools: ZendeskToolDefinition[] = [
 			const { conditions, ...rest } = changes
 			return client.updateView(
 				id,
-				conditions !== undefined ? { ...rest, ...replaceConditions(conditions) } : rest
+				conditions !== undefined ? { ...rest, ...replaceConditions(conditions) } : rest,
 			)
 		},
-		'View updated successfully!'
+		'View updated successfully!',
 	),
 ]

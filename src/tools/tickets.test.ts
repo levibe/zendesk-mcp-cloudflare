@@ -95,7 +95,7 @@ describe('create_ticket', () => {
 		const response = { ticket: { id: 42, subject: 'Printer down' } }
 
 		expect(
-			await call(createTicket, stubClient(response), { subject: 'Printer down', comment: 'Help' })
+			await call(createTicket, stubClient(response), { subject: 'Printer down', comment: 'Help' }),
 		).toBe(response)
 	})
 })
@@ -169,7 +169,7 @@ describe('update_ticket', () => {
 		const client = stubClient()
 
 		await expect(call(updateTicket, client, { id: 42 })).rejects.toThrow(
-			'update_ticket needs at least one field to change'
+			'update_ticket needs at least one field to change',
 		)
 		expect(client.updateTicket).not.toHaveBeenCalled()
 	})

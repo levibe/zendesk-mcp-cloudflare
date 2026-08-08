@@ -22,7 +22,7 @@ export const usersTools: ZendeskToolDefinition[] = [
 		},
 		async (client, params) => {
 			return client.listUsers(params)
-		}
+		},
 	),
 
 	createTool(
@@ -34,7 +34,7 @@ export const usersTools: ZendeskToolDefinition[] = [
 		},
 		async (client, { id }) => {
 			return client.getUser(id)
-		}
+		},
 	),
 
 	// Declared `write`, not `stage`: the account it makes is live the moment the call returns.
@@ -49,7 +49,7 @@ export const usersTools: ZendeskToolDefinition[] = [
 		async (client, params) => {
 			return client.createUser({ ...params, role: 'end-user' })
 		},
-		'User created successfully!'
+		'User created successfully!',
 	),
 
 	createTool(
@@ -62,7 +62,7 @@ export const usersTools: ZendeskToolDefinition[] = [
 
 			return client.updateUser(id, changes)
 		},
-		'User updated successfully!'
+		'User updated successfully!',
 	),
 
 	createTool(
@@ -101,8 +101,8 @@ export const usersTools: ZendeskToolDefinition[] = [
 						page: params.page,
 						per_page: params.per_page,
 					}),
-				'user'
+				'user',
 			)
-		}
+		},
 	),
 ]

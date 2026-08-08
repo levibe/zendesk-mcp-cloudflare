@@ -28,7 +28,7 @@ type StubbedClient = ReturnType<typeof stubClient>
 const call = (
 	tool: typeof createAutomation,
 	client: StubbedClient,
-	params: Record<string, unknown>
+	params: Record<string, unknown>,
 ) => tool.handler(client as unknown as ZendeskClient, params)
 
 /** Pending for 24 hours, then closed — the shape of nearly every real automation. */
@@ -76,7 +76,7 @@ describe('the create schema', () => {
 		'does not accept %s, which an automation does not have',
 		(field) => {
 			expect(createPayload.parse({ ...validAutomation, [field]: 'x' })).not.toHaveProperty(field)
-		}
+		},
 	)
 })
 
@@ -96,7 +96,7 @@ describe('the update schema', () => {
 
 			expect(wording).toMatch(/replaces/i)
 			expect(wording).not.toBe(createAutomationSchema[field].description)
-		}
+		},
 	)
 })
 
@@ -145,7 +145,7 @@ describe('update_automation', () => {
 		const client = stubClient()
 
 		await expect(call(updateAutomation, client, { id: 42 })).rejects.toThrow(
-			'update_automation needs at least one field to change'
+			'update_automation needs at least one field to change',
 		)
 		expect(client.updateAutomation).not.toHaveBeenCalled()
 	})

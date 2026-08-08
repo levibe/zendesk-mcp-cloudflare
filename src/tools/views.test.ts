@@ -89,7 +89,7 @@ describe('the view create schema', () => {
 		'the %s shape does not accept active, so a caller cannot ask for a live view',
 		(_name, payload, base) => {
 			expect(payload.parse({ ...base, active: true })).not.toHaveProperty('active')
-		}
+		},
 	)
 
 	it('requires conditions outright', () => {
@@ -195,7 +195,7 @@ describe('update_view', () => {
 		const client = stubClient()
 
 		await expect(call(updateView, client, { id: 42 })).rejects.toThrow(
-			'update_view needs at least one field to change'
+			'update_view needs at least one field to change',
 		)
 		expect(client.updateView).not.toHaveBeenCalled()
 	})

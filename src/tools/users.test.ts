@@ -46,7 +46,7 @@ describe('the user schemas', () => {
 		'the update shape does not accept %s, so an update cannot change who a user is',
 		(field) => {
 			expect(updatePayload.parse({ [field]: 'admin' })).not.toHaveProperty(field)
-		}
+		},
 	)
 
 	// The create shape refuses `role` the same way: a caller stating one loses it at
@@ -57,7 +57,7 @@ describe('the user schemas', () => {
 			const user = { name: 'Ada', email: 'ada@example.com', role }
 
 			expect(createPayload.parse(user)).not.toHaveProperty('role')
-		}
+		},
 	)
 })
 
@@ -108,7 +108,7 @@ describe('update_user', () => {
 		const client = stubClient()
 
 		await expect(call(client, { id: 42 })).rejects.toThrow(
-			'update_user needs at least one field to change'
+			'update_user needs at least one field to change',
 		)
 		expect(client.updateUser).not.toHaveBeenCalled()
 	})
