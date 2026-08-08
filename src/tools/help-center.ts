@@ -149,7 +149,7 @@ const nextPageOf = (response: Record<string, unknown>): PageCursor => {
 const collectPages = async (
 	budget: Budget,
 	key: string,
-	fetchPage: (page: number) => Promise<unknown>
+	fetchPage: (page: number) => Promise<unknown>,
 ): Promise<HelpCenterEntity[]> => {
 	const entities: HelpCenterEntity[] = []
 
@@ -252,7 +252,7 @@ const sourceLocaleOf = (articleResponse: unknown): string => {
 	}
 
 	throw new Error(
-		"update_article could not read the article's source locale from Zendesk's response, so nothing was changed."
+		"update_article could not read the article's source locale from Zendesk's response, so nothing was changed.",
 	)
 }
 
@@ -267,7 +267,7 @@ export const helpCenterTools: ZendeskToolDefinition[] = [
 		},
 		async (client, params) => {
 			return client.listArticles(params)
-		}
+		},
 	),
 
 	createTool(
@@ -277,7 +277,7 @@ export const helpCenterTools: ZendeskToolDefinition[] = [
 		{ id: idSchema.describe('Article ID') },
 		async (client, { id }) => {
 			return client.getArticle(id)
-		}
+		},
 	),
 
 	createTool(
@@ -292,9 +292,9 @@ export const helpCenterTools: ZendeskToolDefinition[] = [
 			const { query, ...searchParams } = params
 			return executeSearchWithStandardizedResponse(
 				() => client.searchArticles({ query, ...searchParams }),
-				'article'
+				'article',
 			)
-		}
+		},
 	),
 
 	createTool(
@@ -307,7 +307,7 @@ export const helpCenterTools: ZendeskToolDefinition[] = [
 		},
 		async (client, params) => {
 			return client.listCategories(params)
-		}
+		},
 	),
 
 	createTool(
@@ -317,7 +317,7 @@ export const helpCenterTools: ZendeskToolDefinition[] = [
 		{ id: idSchema.describe('Category ID') },
 		async (client, { id }) => {
 			return client.getCategory(id)
-		}
+		},
 	),
 
 	createTool(
@@ -335,9 +335,9 @@ export const helpCenterTools: ZendeskToolDefinition[] = [
 						page: params.page,
 						per_page: params.per_page,
 					}),
-				'category'
+				'category',
 			)
-		}
+		},
 	),
 
 	createTool(
@@ -355,7 +355,7 @@ export const helpCenterTools: ZendeskToolDefinition[] = [
 				return client.listSectionsByCategory(category_id, otherParams)
 			}
 			return client.listSections(params)
-		}
+		},
 	),
 
 	createTool(
@@ -365,7 +365,7 @@ export const helpCenterTools: ZendeskToolDefinition[] = [
 		{ id: idSchema.describe('Section ID') },
 		async (client, { id }) => {
 			return client.getSection(id)
-		}
+		},
 	),
 
 	createTool(
@@ -391,9 +391,9 @@ export const helpCenterTools: ZendeskToolDefinition[] = [
 						page: params.page,
 						per_page: params.per_page,
 					}),
-				'section'
+				'section',
 			)
-		}
+		},
 	),
 
 	createTool(
@@ -422,7 +422,7 @@ export const helpCenterTools: ZendeskToolDefinition[] = [
 			let categories: HelpCenterEntity[]
 			if (params.category_id === undefined) {
 				categories = await collectPages(budget, 'categories', (page) =>
-					client.listCategories({ per_page: PAGE_SIZE, page })
+					client.listCategories({ per_page: PAGE_SIZE, page }),
 				)
 			} else {
 				// One named category. A single fetch has no pages beneath it, so this is the one
@@ -435,7 +435,7 @@ export const helpCenterTools: ZendeskToolDefinition[] = [
 			const walked = await mapWithLimit(categories, async (category) => ({
 				category,
 				sections: await collectPages(budget, 'sections', (page) =>
-					client.listSectionsByCategory(category.id, { per_page: PAGE_SIZE, page })
+					client.listSectionsByCategory(category.id, { per_page: PAGE_SIZE, page }),
 				),
 			}))
 
@@ -450,13 +450,13 @@ export const helpCenterTools: ZendeskToolDefinition[] = [
 				const sectionsWithArticles = await mapWithLimit(sections, async (section) => ({
 					...section,
 					articles: await collectPages(budget, 'articles', (page) =>
-						client.listArticlesBySection(section.id, { per_page: PAGE_SIZE, page })
+						client.listArticlesBySection(section.id, { per_page: PAGE_SIZE, page }),
 					),
 				}))
 
 				articlesReturned = sectionsWithArticles.reduce(
 					(sum, section) => sum + section.articles.length,
-					0
+					0,
 				)
 
 				// `mapWithLimit` answers in input order, and that is what lets one flat result be cut
@@ -486,7 +486,7 @@ export const helpCenterTools: ZendeskToolDefinition[] = [
 				...(articlesReturned !== undefined && { articles_returned: articlesReturned }),
 				hierarchy,
 			}
-		}
+		},
 	),
 
 	createTool(
@@ -501,7 +501,7 @@ export const helpCenterTools: ZendeskToolDefinition[] = [
 		async (client, params) => {
 			const { section_id, ...otherParams } = params
 			return client.listArticlesBySection(section_id, otherParams)
-		}
+		},
 	),
 
 	// The two writes, withheld while the helpCenter ceiling ships at `read`, so no client is
@@ -522,7 +522,7 @@ export const helpCenterTools: ZendeskToolDefinition[] = [
 		async (client, { section_id, ...article }) => {
 			return client.createArticle({ ...article, draft: true }, section_id)
 		},
-		'Article created successfully, as a draft. No customer can see it until someone publishes it in the Zendesk UI.'
+		'Article created successfully, as a draft. No customer can see it until someone publishes it in the Zendesk UI.',
 	),
 
 	createTool(
@@ -554,6 +554,6 @@ export const helpCenterTools: ZendeskToolDefinition[] = [
 			}
 			return result
 		},
-		'Article updated successfully!'
+		'Article updated successfully!',
 	),
 ]

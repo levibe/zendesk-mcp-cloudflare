@@ -18,7 +18,7 @@ export const organizationsTools: ZendeskToolDefinition[] = [
 		paginationSchema,
 		async (client, params) => {
 			return client.listOrganizations(params)
-		}
+		},
 	),
 
 	createTool(
@@ -28,7 +28,7 @@ export const organizationsTools: ZendeskToolDefinition[] = [
 		{ id: idSchema.describe('Organization ID') },
 		async (client, { id }) => {
 			return client.getOrganization(id)
-		}
+		},
 	),
 
 	// Declared `write` — an organization is live the moment it exists — and withheld while the
@@ -43,7 +43,7 @@ export const organizationsTools: ZendeskToolDefinition[] = [
 		async (client, params) => {
 			return client.createOrganization(params)
 		},
-		'Organization created successfully!'
+		'Organization created successfully!',
 	),
 
 	createTool(
@@ -56,7 +56,7 @@ export const organizationsTools: ZendeskToolDefinition[] = [
 
 			return client.updateOrganization(id, changes)
 		},
-		'Organization updated successfully!'
+		'Organization updated successfully!',
 	),
 
 	createTool(
@@ -94,8 +94,8 @@ export const organizationsTools: ZendeskToolDefinition[] = [
 						page: params.page,
 						per_page: params.per_page,
 					}),
-				'organization'
+				'organization',
 			)
-		}
+		},
 	),
 ]

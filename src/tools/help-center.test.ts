@@ -75,14 +75,14 @@ const stubClient = (responses: StubbedResponses) => {
 	return {
 		concurrency,
 		listCategories: vi.fn((params?: Record<string, unknown>) =>
-			answer(responses.listCategories, params)
+			answer(responses.listCategories, params),
 		),
 		getCategory: vi.fn(() => answer(responses.getCategory)),
 		listSectionsByCategory: vi.fn((id: number, params?: Record<string, unknown>) =>
-			answer(responses.sectionsByCategory?.[id], params)
+			answer(responses.sectionsByCategory?.[id], params),
 		),
 		listArticlesBySection: vi.fn((id: number, params?: Record<string, unknown>) =>
-			answer(responses.articlesBySection?.[id], params)
+			answer(responses.articlesBySection?.[id], params),
 		),
 	}
 }
@@ -155,7 +155,7 @@ const wideTree = (categories: number, sections: number) =>
 						id: (category + 1) * 1000 + index,
 					})),
 				},
-			])
+			]),
 		),
 	})
 
@@ -425,10 +425,10 @@ describe('get_help_center_hierarchy', () => {
 			// exactly the case where reporting the count as a total would be a lie.
 			const client = stubClient({
 				listCategories: Array.from({ length: 6 }, (_unused, index) =>
-					listBody('categories', [{ id: index + 1 }], true)
+					listBody('categories', [{ id: index + 1 }], true),
 				),
 				sectionsByCategory: Object.fromEntries(
-					Array.from({ length: 6 }, (_unused, index) => [index + 1, { sections: [] }])
+					Array.from({ length: 6 }, (_unused, index) => [index + 1, { sections: [] }]),
 				),
 			})
 
@@ -598,7 +598,7 @@ const stubArticleClient = (article: unknown = { article: { id: 1, source_locale:
 	createArticle: vi.fn(async (_data: ArticleCreatePayload, _sectionId: number) => article),
 	updateArticle: vi.fn(async (_id: number, _data: ArticleUpdatePayload) => article),
 	updateArticleTranslation: vi.fn(
-		async (_id: number, _locale: string, _data: ArticleTranslationUpdatePayload) => article
+		async (_id: number, _locale: string, _data: ArticleTranslationUpdatePayload) => article,
 	),
 })
 
@@ -607,7 +607,7 @@ type StubbedArticleClient = ReturnType<typeof stubArticleClient>
 const callArticleTool = (
 	tool: typeof createArticle,
 	client: StubbedArticleClient,
-	params: Record<string, unknown>
+	params: Record<string, unknown>,
 ) => tool.handler(client as unknown as ZendeskClient, params)
 
 /** The smallest article the schema accepts, so a test can vary one thing about it. */
@@ -626,7 +626,7 @@ describe('the article create schema', () => {
 			const { [field]: _omitted, ...withoutField } = validArticle as Record<string, unknown>
 
 			expect(createArticlePayload.safeParse(withoutField).success).toBe(false)
-		}
+		},
 	)
 
 	// Required and nullable rather than optional, which is the point. Null means everyone can
@@ -640,7 +640,7 @@ describe('the article create schema', () => {
 	// and Zod strips what it does not declare — hence absence rather than a refusal.
 	it('does not accept draft, so a caller cannot ask to publish', () => {
 		expect(createArticlePayload.parse({ ...validArticle, draft: false })).not.toHaveProperty(
-			'draft'
+			'draft',
 		)
 	})
 
@@ -668,7 +668,7 @@ describe('the article update schema', () => {
 		'does not accept %s, so an update cannot change who sees the article',
 		(field) => {
 			expect(updateArticlePayload.parse({ [field]: 1 })).not.toHaveProperty(field)
-		}
+		},
 	)
 
 	// Zendesk does not document whether sending label_names replaces the set or merges into it,
@@ -719,7 +719,7 @@ describe('create_article', () => {
 		const created = { article: { id: 42 } }
 
 		expect(await callArticleTool(createArticle, stubArticleClient(created), validArticle)).toBe(
-			created
+			created,
 		)
 	})
 
@@ -764,7 +764,7 @@ describe('update_article', () => {
 		})
 		expect(client.updateArticle).toHaveBeenCalledWith(42, { promoted: true })
 		expect(client.updateArticleTranslation.mock.invocationCallOrder[0]).toBeLessThan(
-			client.updateArticle.mock.invocationCallOrder[0]
+			client.updateArticle.mock.invocationCallOrder[0],
 		)
 	})
 
@@ -774,7 +774,7 @@ describe('update_article', () => {
 		const client = stubArticleClient({ article: { id: 42 } })
 
 		await expect(
-			callArticleTool(updateArticle, client, { id: 42, title: 'Renamed' })
+			callArticleTool(updateArticle, client, { id: 42, title: 'Renamed' }),
 		).rejects.toThrow('source locale')
 		expect(client.updateArticleTranslation).not.toHaveBeenCalled()
 		expect(client.updateArticle).not.toHaveBeenCalled()
@@ -786,7 +786,7 @@ describe('update_article', () => {
 		const client = stubArticleClient()
 
 		await expect(callArticleTool(updateArticle, client, { id: 42 })).rejects.toThrow(
-			'update_article needs at least one field to change'
+			'update_article needs at least one field to change',
 		)
 		expect(client.updateArticle).not.toHaveBeenCalled()
 		expect(client.updateArticleTranslation).not.toHaveBeenCalled()

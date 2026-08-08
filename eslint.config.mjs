@@ -68,7 +68,9 @@ export default tseslint.config(
 		},
 	},
 	// Must stay last so it switches off every formatting rule enabled above and
-	// leaves Prettier as the only thing with an opinion about layout.
+	// leaves oxfmt as the only thing with an opinion about layout. Only the package
+	// name still says "prettier" — what it does is disable ESLint's formatting rules,
+	// which is what you want behind any external formatter.
 	prettier,
 	{
 		ignores: [
@@ -81,5 +83,5 @@ export default tseslint.config(
 			'*.cjs',
 			'*.d.ts',
 		],
-	}
+	},
 )

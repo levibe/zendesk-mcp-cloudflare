@@ -10,7 +10,7 @@ export const groupsTools: ZendeskToolDefinition[] = [
 		paginationSchema,
 		async (client, params) => {
 			return client.listGroups(params)
-		}
+		},
 	),
 
 	createTool(
@@ -20,7 +20,7 @@ export const groupsTools: ZendeskToolDefinition[] = [
 		{ id: idSchema.describe('Group ID') },
 		async (client, { id }) => {
 			return client.getGroup(id)
-		}
+		},
 	),
 
 	// Declared `write` — an agent group is live routing the moment it exists — and withheld
@@ -33,7 +33,7 @@ export const groupsTools: ZendeskToolDefinition[] = [
 		async (client, params) => {
 			return client.createGroup(params)
 		},
-		'Group created successfully!'
+		'Group created successfully!',
 	),
 
 	createTool(
@@ -46,6 +46,6 @@ export const groupsTools: ZendeskToolDefinition[] = [
 
 			return client.updateGroup(id, changes)
 		},
-		'Group updated successfully!'
+		'Group updated successfully!',
 	),
 ]
