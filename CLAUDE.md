@@ -51,10 +51,10 @@ pnpm run type-check      # Run TypeScript type checking
 
 ### Code Quality
 
-Prettier owns formatting and ESLint owns everything else. ESLint's formatting rules are switched off through `eslint-config-prettier`, so the two never disagree — don't add stylistic rules back to `eslint.config.mjs`.
+oxfmt owns formatting and ESLint owns everything else. ESLint's formatting rules are switched off through `eslint-config-prettier`, whose name is all that still ties it to Prettier — what it does is disable ESLint's formatting rules behind any external formatter. So the two never disagree, and stylistic rules don't belong back in `eslint.config.mjs`.
 
 ```bash
-pnpm run format          # Format the repository with Prettier
+pnpm run format          # Format the repository with oxfmt
 pnpm run format:check    # Check formatting without writing (used by validate)
 pnpm run lint            # Lint src/ with ESLint
 pnpm run lint:fix        # Lint and auto-fix
