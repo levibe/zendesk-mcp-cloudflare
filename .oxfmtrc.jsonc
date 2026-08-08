@@ -1,0 +1,29 @@
+{
+	"$schema": "./node_modules/oxfmt/configuration_schema.json",
+	"useTabs": true,
+	"singleQuote": true,
+	"semi": false,
+	"ignorePatterns": [
+		"node_modules",
+		"dist",
+		"build",
+		"coverage",
+		"pnpm-lock.yaml",
+		"package-lock.json",
+		"yarn.lock",
+		".wrangler",
+		".claude",
+		// Worktrees live in-repo at .worktrees/<branch> and are ignored through the global git
+		// ignore, not this repo's .gitignore. Git honours the global file and oxfmt does not, so
+		// `oxfmt --check` would otherwise walk into every worktree and check another branch's
+		// working tree as though it were this one's. It goes wrong at the worst moment: an
+		// unresolved conflict marker is a syntax error, so a merge paused in one worktree would
+		// fail `validate` in all of them, naming a file on a branch you are not on.
+		".worktrees/",
+		"**/.claude/worktrees/",
+		// Generated declaration files, chiefly the 551KB worker-configuration.d.ts that
+		// `wrangler types` writes. Reformatting them is pure churn and the next cf-typegen
+		// overwrites it anyway.
+		"**/*.d.ts",
+	],
+}
