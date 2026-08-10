@@ -24,7 +24,7 @@ export const automationsTools: ZendeskToolDefinition[] = [
 		paginationSchema,
 		async (client, params) => {
 			return client.listAutomations(params)
-		}
+		},
 	),
 
 	createTool(
@@ -34,7 +34,7 @@ export const automationsTools: ZendeskToolDefinition[] = [
 		{ id: idSchema.describe('Automation ID') },
 		async (client, { id }) => {
 			return client.getAutomation(id)
-		}
+		},
 	),
 
 	createTool(
@@ -45,7 +45,7 @@ export const automationsTools: ZendeskToolDefinition[] = [
 		async (client, params) => {
 			return client.createAutomation({ ...params, active: false })
 		},
-		'Automation created successfully, and is inactive. Enable it in the Zendesk UI once you have read it back — its first run will sweep every ticket that already matches.'
+		'Automation created successfully, and is inactive. Enable it in the Zendesk UI once you have read it back — its first run will sweep every ticket that already matches.',
 	),
 
 	createTool(
@@ -58,6 +58,6 @@ export const automationsTools: ZendeskToolDefinition[] = [
 
 			return client.updateAutomation(id, changes)
 		},
-		'Automation updated successfully!'
+		'Automation updated successfully!',
 	),
 ]

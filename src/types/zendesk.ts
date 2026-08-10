@@ -83,7 +83,7 @@ export const updateTicketSchema = {
 	group_id: z.number().optional().describe('New group ID for the ticket'),
 	type: ticketTypeSchema.optional().describe('Updated ticket type'),
 	tags: tagsSchema.describe(
-		"The ticket's complete tag list. Read the ticket with get_ticket first and send all of its tags rather than only the new ones, since what arrives replaces the set"
+		"The ticket's complete tag list. Read the ticket with get_ticket first and send all of its tags rather than only the new ones, since what arrives replaces the set",
 	),
 }
 
@@ -156,7 +156,7 @@ export const updateOrganizationSchema = {
 	details: descriptionSchema.describe('Updated details about the organization'),
 	notes: z.string().optional().describe('Updated notes about the organization'),
 	tags: tagsSchema.describe(
-		"The organization's complete tag list. Read the organization first and send all of its tags rather than only the new ones, since what arrives replaces the set"
+		"The organization's complete tag list. Read the organization first and send all of its tags rather than only the new ones, since what arrives replaces the set",
 	),
 }
 
@@ -204,7 +204,7 @@ export const macroActionSchema = z.object({
 	value: z
 		.union([z.string(), z.boolean(), z.array(z.string())])
 		.describe(
-			'Value to set: usually a string, an array of strings for actions taking several parts, or a boolean for comment_mode_is_public'
+			'Value to set: usually a string, an array of strings for actions taking several parts, or a boolean for comment_mode_is_public',
 		),
 })
 
@@ -247,7 +247,7 @@ export const updateMacroSchema = {
 	...z.object(createMacroSchema).partial().shape,
 	actions: createMacroSchema.actions
 		.describe(
-			"The macro's complete action list, which replaces the existing one. Zendesk drops any action left out, so read the macro with get_macro first and send all of its actions rather than only the new ones"
+			"The macro's complete action list, which replaces the existing one. Zendesk drops any action left out, so read the macro with get_macro first and send all of its actions rather than only the new ones",
 		)
 		.optional(),
 }
@@ -361,7 +361,7 @@ export const businessRuleActionSchema = z.object({
 	value: z
 		.union([z.string(), z.boolean(), z.array(z.string())])
 		.describe(
-			'Value to set: usually a string, an array of strings for actions taking several parts, or a boolean for comment_mode_is_public'
+			'Value to set: usually a string, an array of strings for actions taking several parts, or a boolean for comment_mode_is_public',
 		),
 })
 
@@ -387,7 +387,7 @@ export const createTriggerSchema = {
 		.optional()
 		.describe('ID of the trigger category this belongs to, as a string'),
 	conditions: businessRuleConditionsSchema.describe(
-		'When the trigger fires. It runs on every ticket create and update that matches'
+		'When the trigger fires. It runs on every ticket create and update that matches',
 	),
 	actions: z.array(businessRuleActionSchema).min(1).describe('What the trigger does when it fires'),
 	position: z
@@ -411,12 +411,12 @@ export const updateTriggerSchema = {
 	...z.object(createTriggerSchema).partial().shape,
 	conditions: createTriggerSchema.conditions
 		.describe(
-			"The trigger's complete condition set, which replaces the existing one. Zendesk drops any condition left out, and a trigger left with fewer conditions matches more tickets — so read the trigger with get_trigger first and send all of its conditions rather than only the changed ones"
+			"The trigger's complete condition set, which replaces the existing one. Zendesk drops any condition left out, and a trigger left with fewer conditions matches more tickets — so read the trigger with get_trigger first and send all of its conditions rather than only the changed ones",
 		)
 		.optional(),
 	actions: createTriggerSchema.actions
 		.describe(
-			"The trigger's complete action list, which replaces the existing one. Zendesk drops any action left out, so read the trigger with get_trigger first and send all of its actions rather than only the new ones"
+			"The trigger's complete action list, which replaces the existing one. Zendesk drops any action left out, so read the trigger with get_trigger first and send all of its actions rather than only the new ones",
 		)
 		.optional(),
 }
@@ -436,13 +436,13 @@ export const updateTriggerSchema = {
 export const createAutomationSchema = {
 	title: z.string().min(1).describe('Automation title'),
 	conditions: businessRuleConditionsSchema.describe(
-		'When the automation runs. Zendesk requires at least one time-based condition — NEW, OPEN, PENDING, SOLVED, CLOSED, assigned_at, updated_at, requester_updated_at, assignee_updated_at, due_date or until_due_date — and it has to go in all rather than any'
+		'When the automation runs. Zendesk requires at least one time-based condition — NEW, OPEN, PENDING, SOLVED, CLOSED, assigned_at, updated_at, requester_updated_at, assignee_updated_at, due_date or until_due_date — and it has to go in all rather than any',
 	),
 	actions: z
 		.array(businessRuleActionSchema)
 		.min(1)
 		.describe(
-			'What the automation does. One action should undo one of the conditions above, or the automation runs again on the same ticket every cycle'
+			'What the automation does. One action should undo one of the conditions above, or the automation runs again on the same ticket every cycle',
 		),
 	position: z
 		.number()
@@ -457,12 +457,12 @@ export const updateAutomationSchema = {
 	...z.object(createAutomationSchema).partial().shape,
 	conditions: createAutomationSchema.conditions
 		.describe(
-			"The automation's complete condition set, which replaces the existing one. Zendesk drops any condition left out, and an automation left with fewer conditions matches more tickets — so read it with get_automation first and send all of its conditions rather than only the changed ones"
+			"The automation's complete condition set, which replaces the existing one. Zendesk drops any condition left out, and an automation left with fewer conditions matches more tickets — so read it with get_automation first and send all of its conditions rather than only the changed ones",
 		)
 		.optional(),
 	actions: createAutomationSchema.actions
 		.describe(
-			"The automation's complete action list, which replaces the existing one. Zendesk drops any action left out, so read the automation with get_automation first and send all of its actions rather than only the new ones"
+			"The automation's complete action list, which replaces the existing one. Zendesk drops any action left out, so read the automation with get_automation first and send all of its actions rather than only the new ones",
 		)
 		.optional(),
 }
@@ -493,7 +493,7 @@ export const viewOutputSchema = z.object({
 		.array(z.string())
 		.min(1)
 		.describe(
-			'Ticket fields shown as columns, as field names — e.g. subject, status, assignee, updated — not the column objects a read returns under execution'
+			'Ticket fields shown as columns, as field names — e.g. subject, status, assignee, updated — not the column objects a read returns under execution',
 		),
 	group_by: z.string().optional().describe('Field the rows are grouped by'),
 	group_order: z.enum(['asc', 'desc']).optional().describe('Direction the groups are ordered in'),
@@ -536,7 +536,7 @@ export const viewConditionsSchema = z.object({
 		.array(businessRuleConditionSchema)
 		.min(1)
 		.describe(
-			'Conditions that must all match. Zendesk requires at least one here, including at least one testing status, type, group_id, assignee_id or requester_id. Time-based conditions have to go here'
+			'Conditions that must all match. Zendesk requires at least one here, including at least one testing status, type, group_id, assignee_id or requester_id. Time-based conditions have to go here',
 		),
 	any: z
 		.array(businessRuleConditionSchema)
@@ -566,13 +566,13 @@ export const createViewSchema = {
 	title: z.string().min(1).describe('View title, shown to agents as the name of the queue'),
 	description: descriptionSchema.describe('View description'),
 	conditions: viewConditionsSchema.describe(
-		'Which tickets the view lists, as the same all/any condition grammar triggers use'
+		'Which tickets the view lists, as the same all/any condition grammar triggers use',
 	),
 	output: viewOutputSchema.describe('Which columns the view shows and how rows group and sort'),
 	restriction: viewRestrictionSchema
 		.nullable()
 		.describe(
-			'Which agent groups are offered the view, or null to offer it to every agent. Required rather than optional, because who works a queue is not something to leave to a default'
+			'Which agent groups are offered the view, or null to offer it to every agent. Required rather than optional, because who works a queue is not something to leave to a default',
 		),
 }
 
@@ -582,7 +582,7 @@ export const updateViewSchema = {
 	conditions: viewConditionsSchema
 		.optional()
 		.describe(
-			'Replacement conditions. Send the complete set: what arrives replaces every existing condition rather than adding to them'
+			'Replacement conditions. Send the complete set: what arrives replaces every existing condition rather than adding to them',
 		),
 	output: viewOutputSchema
 		.optional()
@@ -694,7 +694,7 @@ export const createArticleSchema = {
 		.string()
 		.min(1)
 		.describe(
-			'Locale the article is written in, lowercase and hyphenated, e.g. en-us. It must be one this Help Center has enabled — a locale Zendesk accepts but nobody reads files the article out of sight rather than failing'
+			'Locale the article is written in, lowercase and hyphenated, e.g. en-us. It must be one this Help Center has enabled — a locale Zendesk accepts but nobody reads files the article out of sight rather than failing',
 		),
 	permission_group_id: z
 		.number()
@@ -705,7 +705,7 @@ export const createArticleSchema = {
 		.int()
 		.nullable()
 		.describe(
-			'ID of the user segment deciding who may see this article, or null to make it visible to everyone. Required rather than optional, because who can read an article is not something to leave to a default'
+			'ID of the user segment deciding who may see this article, or null to make it visible to everyone. Required rather than optional, because who can read an article is not something to leave to a default',
 		),
 }
 
@@ -732,7 +732,7 @@ export const updateArticleSchema = {
 	label_names: articleContentSchema.label_names
 		.unwrap()
 		.describe(
-			"The article's complete label list. Read the article with get_article first and send all of its labels rather than only the new ones, since sending a partial list may drop the rest"
+			"The article's complete label list. Read the article with get_article first and send all of its labels rather than only the new ones, since sending a partial list may drop the rest",
 		)
 		.optional(),
 }

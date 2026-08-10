@@ -20,6 +20,6 @@ export const supportTools: ZendeskToolDefinition[] = [
 		{},
 		async (client) => {
 			return summarizeCurrentUser(await client.getCurrentUser())
-		}
+		},
 	),
 ]

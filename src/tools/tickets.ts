@@ -24,7 +24,7 @@ export const ticketsTools: ZendeskToolDefinition[] = [
 		},
 		async (client, params) => {
 			return client.listTickets(params)
-		}
+		},
 	),
 
 	createTool(
@@ -36,7 +36,7 @@ export const ticketsTools: ZendeskToolDefinition[] = [
 		},
 		async (client, { id }) => {
 			return client.getTicket(id)
-		}
+		},
 	),
 
 	// The one reshaping either ticket write does: the schema takes the comment as a string,
@@ -49,7 +49,7 @@ export const ticketsTools: ZendeskToolDefinition[] = [
 		async (client, { comment, ...rest }) => {
 			return client.createTicket({ ...rest, comment: { body: comment } })
 		},
-		'Ticket created successfully!'
+		'Ticket created successfully!',
 	),
 
 	createTool(
@@ -99,9 +99,9 @@ export const ticketsTools: ZendeskToolDefinition[] = [
 						page: params.page,
 						per_page: params.per_page,
 					}),
-				'ticket'
+				'ticket',
 			)
-		}
+		},
 	),
 
 	createTool(
@@ -115,10 +115,10 @@ export const ticketsTools: ZendeskToolDefinition[] = [
 			const { comment, ...rest } = changes
 			return client.updateTicket(
 				id,
-				comment !== undefined ? { ...rest, comment: { body: comment } } : rest
+				comment !== undefined ? { ...rest, comment: { body: comment } } : rest,
 			)
 		},
-		'Ticket updated successfully!'
+		'Ticket updated successfully!',
 	),
 
 	createTool(
@@ -134,6 +134,6 @@ export const ticketsTools: ZendeskToolDefinition[] = [
 		async (client, { id }) => {
 			await client.deleteTicket(id)
 			return `Ticket ${id} deleted successfully!`
-		}
+		},
 	),
 ]

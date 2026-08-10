@@ -17,7 +17,7 @@ export const macrosTools: ZendeskToolDefinition[] = [
 		paginationSchema,
 		async (client, params) => {
 			return client.listMacros(params)
-		}
+		},
 	),
 
 	createTool(
@@ -27,7 +27,7 @@ export const macrosTools: ZendeskToolDefinition[] = [
 		{ id: idSchema.describe('Macro ID') },
 		async (client, { id }) => {
 			return client.getMacro(id)
-		}
+		},
 	),
 
 	createTool(
@@ -38,7 +38,7 @@ export const macrosTools: ZendeskToolDefinition[] = [
 		async (client, params) => {
 			return client.createMacro(params)
 		},
-		'Macro created successfully!'
+		'Macro created successfully!',
 	),
 
 	createTool(
@@ -51,6 +51,6 @@ export const macrosTools: ZendeskToolDefinition[] = [
 
 			return client.updateMacro(id, changes)
 		},
-		'Macro updated successfully!'
+		'Macro updated successfully!',
 	),
 ]

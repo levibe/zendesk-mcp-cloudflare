@@ -1,12 +1,8 @@
 {
 	"name": "zendesk-mcp",
 	"version": "0.2.0",
-	"type": "module",
 	"private": true,
-	"packageManager": "pnpm@11.18.0",
-	"engines": {
-		"node": ">=22.13"
-	},
+	"type": "module",
 	"scripts": {
 		"deploy": "wrangler deploy",
 		"dev": "wrangler dev",
@@ -15,8 +11,8 @@
 		"type-check": "tsc --noEmit",
 		"lint": "eslint src/",
 		"lint:fix": "eslint src/ --fix",
-		"format": "prettier --write .",
-		"format:check": "prettier --check .",
+		"format": "oxfmt",
+		"format:check": "oxfmt --check",
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"test:coverage": "vitest run --coverage",
@@ -37,10 +33,14 @@
 		"eslint": "^9.31.0",
 		"eslint-config-prettier": "^10.1.8",
 		"jsonc-parser": "^3.3.1",
-		"prettier": "^3.6.2",
+		"oxfmt": "^0.61.0",
 		"typescript": "^5.8.3",
 		"typescript-eslint": "^8.65.0",
 		"vitest": "^4.1.10",
 		"wrangler": "^4.114.0"
-	}
+	},
+	"engines": {
+		"node": ">=22.13"
+	},
+	"packageManager": "pnpm@11.18.0"
 }

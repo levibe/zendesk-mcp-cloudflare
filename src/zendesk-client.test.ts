@@ -105,7 +105,7 @@ describe('the subdomain', () => {
 		new ZendeskClient({ ...credentials, subdomain: 'exam ple' })
 
 		expect(console.warn).toHaveBeenCalledWith(
-			'Subdomain was sanitized from "exam ple" to "example"'
+			'Subdomain was sanitized from "exam ple" to "example"',
 		)
 	})
 
@@ -142,7 +142,7 @@ describe('id validation', () => {
 		const fetchMock = stubFetch(async () => jsonResponse({}))
 
 		await expect(client.getTicket(id)).rejects.toThrow(
-			`Invalid ID: ${id}. ID must be a positive integer.`
+			`Invalid ID: ${id}. ID must be a positive integer.`,
 		)
 		expect(fetchMock).not.toHaveBeenCalled()
 	})
@@ -167,7 +167,7 @@ describe('the credentials', () => {
 		await client.listTickets()
 
 		expect(sent(fetchMock).headers.Authorization).toBe(
-			`Basic ${btoa('agent@example.com/token:secret-token')}`
+			`Basic ${btoa('agent@example.com/token:secret-token')}`,
 		)
 	})
 
@@ -215,7 +215,7 @@ describe('the request an API method makes', () => {
 
 		expect(sent(fetchMock).method).toBe('POST')
 		expect(sent(fetchMock).body).toBe(
-			JSON.stringify({ ticket: { subject: 'Cannot log in', comment: { body: 'Help' } } })
+			JSON.stringify({ ticket: { subject: 'Cannot log in', comment: { body: 'Help' } } }),
 		)
 	})
 
@@ -259,7 +259,7 @@ describe('which methods retry', () => {
 	const notAnApiCall = new Set(['constructor', 'send', 'validateId'])
 
 	const apiMethods = Object.getOwnPropertyNames(ZendeskClient.prototype).filter(
-		(name) => !notAnApiCall.has(name)
+		(name) => !notAnApiCall.has(name),
 	)
 
 	/**
@@ -376,7 +376,7 @@ describe('the per-verb retry policy', () => {
 			const fetchMock = dropped()
 
 			const rejects = expect(
-				client.createTicket({ subject: 'hi', comment: { body: 'hi' } })
+				client.createTicket({ subject: 'hi', comment: { body: 'hi' } }),
 			).rejects.toThrow('Zendesk request failed')
 			await drainBackoff()
 			await rejects

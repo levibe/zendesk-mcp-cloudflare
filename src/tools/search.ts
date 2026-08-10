@@ -31,8 +31,8 @@ export const searchTools: ZendeskToolDefinition[] = [
 
 			return executeSearchWithStandardizedResponse(
 				() => client.search(searchQuery, searchParams),
-				type || 'mixed'
+				type || 'mixed',
 			)
-		}
+		},
 	),
 ]

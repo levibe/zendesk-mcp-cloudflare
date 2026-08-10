@@ -46,8 +46,8 @@ describe('support_info', () => {
 							authenticity_token: 'do-not-hand-this-out',
 						},
 					}),
-					{ headers: { 'content-type': 'application/json' } }
-				)
+					{ headers: { 'content-type': 'application/json' } },
+				),
 		)
 		vi.stubGlobal('fetch', fetchMock)
 
@@ -75,7 +75,7 @@ describe('support_info', () => {
 			async () =>
 				new Response(JSON.stringify({ user: { id: 1, authenticity_token: 'leaked' } }), {
 					headers: { 'content-type': 'application/json' },
-				})
+				}),
 		)
 		vi.stubGlobal('fetch', fetchMock)
 
@@ -86,7 +86,7 @@ describe('support_info', () => {
 	// shape of the old hardcoded string, and it reports a broken deployment as a healthy one.
 	it('fails when the credentials are rejected, rather than reporting success', async () => {
 		const fetchMock = vi.fn(
-			async () => new Response('{"error":"Couldn\'t authenticate you"}', { status: 401 })
+			async () => new Response('{"error":"Couldn\'t authenticate you"}', { status: 401 }),
 		)
 		vi.stubGlobal('fetch', fetchMock)
 

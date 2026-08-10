@@ -71,7 +71,7 @@ describe('standardizeSearchResponse', () => {
 		it('uses defaultResultType when the url infers nothing', () => {
 			const { results } = standardizeSearchResponse(
 				{ results: [{ id: 1 }, { url: apiUrl('/satisfaction_ratings/1.json') }] },
-				'ticket'
+				'ticket',
 			)
 
 			expect(results.map((result) => result.result_type)).toEqual(['ticket', 'ticket'])
@@ -183,7 +183,7 @@ describe('executeSearchWithStandardizedResponse', () => {
 	it('standardizes a body the operation resolved with', async () => {
 		const response = await executeSearchWithStandardizedResponse(
 			async () => ({ results: [{ url: apiUrl('/tickets/1.json') }], count: 1 }),
-			'ticket'
+			'ticket',
 		)
 
 		expect(response.results).toEqual([{ url: apiUrl('/tickets/1.json'), result_type: 'ticket' }])
@@ -207,7 +207,7 @@ describe('executeSearchWithStandardizedResponse', () => {
 	it('rethrows the client error itself, status and all', async () => {
 		const thrown = new ZendeskRequestError(
 			'Zendesk request failed: Zendesk API Error: 503 - down',
-			503
+			503,
 		)
 		const failure = executeSearchWithStandardizedResponse(async () => {
 			throw thrown
@@ -231,7 +231,7 @@ describe('executeSearchWithStandardizedResponse', () => {
 					cause: expect.objectContaining({ message: 'upstream unavailable' }),
 				}),
 				defaultResultType: 'ticket',
-			})
+			}),
 		)
 	})
 
@@ -246,7 +246,7 @@ describe('executeSearchWithStandardizedResponse', () => {
 		await expect(failure).rejects.toBe('a bare string')
 		expect(consoleError).toHaveBeenCalledWith(
 			'Search operation failed',
-			expect.objectContaining({ error: 'a bare string' })
+			expect.objectContaining({ error: 'a bare string' }),
 		)
 	})
 })

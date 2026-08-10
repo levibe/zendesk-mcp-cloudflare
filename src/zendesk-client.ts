@@ -118,7 +118,7 @@ export class ZendeskClient {
 		method: string,
 		endpoint: string,
 		data?: unknown,
-		params?: Record<string, unknown>
+		params?: Record<string, unknown>,
 	): Promise<unknown> {
 		return this.http.send(method, endpoint, data, params)
 	}
@@ -365,13 +365,13 @@ export class ZendeskClient {
 	async updateArticleTranslation(
 		id: number,
 		locale: string,
-		data: ArticleTranslationUpdatePayload
+		data: ArticleTranslationUpdatePayload,
 	) {
 		this.validateId(id)
 		return this.send(
 			'PUT',
 			`/help_center/articles/${id}/translations/${encodeURIComponent(locale)}.json`,
-			{ translation: data }
+			{ translation: data },
 		)
 	}
 
