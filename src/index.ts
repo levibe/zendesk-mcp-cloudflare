@@ -31,11 +31,8 @@ export default createMcpWorker<Env, ZendeskClient>({
 	// therefore also the window a departed colleague keeps full access for, which is the cost
 	// this number buys and the thing #91 is what actually fixes.
 	refreshTokenTTL: 31_536_000,
-	// This deployment lives on a dedicated mcp.* subdomain, where the '/mcp' suffix is
-	// redundant, so the endpoint answers at the bare subdomain root as well. '/mcp' stays the
-	// canonical path — existing clients and the connector's own discovery keep using it — and
-	// '/' is an equal alias so a client pointed at just https://zendesk.mcp.momentum.levi.is
-	// connects without anyone having to know to append '/mcp'. The provider matches '/' exactly,
-	// so it never shadows /authorize, /token, /register or the OAuth metadata.
-	route: ['/mcp', '/'],
+	// MCP answers only at the default '/mcp'. A bare-root alias ('/') was tried and removed:
+	// it serves other clients fine but Claude's hosted connector binds the OAuth resource to the
+	// exact URL entered, so a bare origin completes OAuth and then never opens a session. See the
+	// `route` doc comment in @levibe/mcp-worker.
 })
